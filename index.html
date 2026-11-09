@@ -1,0 +1,2602 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!--
+    Content-Security-Policy: limits what this page may load/contact.
+    The only third-party script is PeerJS (version-pinned) from unpkg.com.
+    If you point PEER_SERVER (see script below) at your own signaling server,
+    add its origins to connect-src.
+  -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' https://unpkg.com; style-src 'unsafe-inline'; img-src data: blob: https:; connect-src https://0.peerjs.com wss://0.peerjs.com; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#0d0a1a">
+  <meta name="description" content="The Great Whodini is a guessing game for two. You each pick a secret character, then take turns asking yes/no questions to work out the other's. Plays right in your browser.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E🎩%3C/text%3E%3C/svg%3E">
+  <title>The Great Whodini – a guessing game for two</title>
+
+  <!-- PeerJS: direct WebRTC peer-to-peer data channels -->
+  <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
+
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0d0a1a;
+      --bg-soft: #141028;
+      --panel: #1a1535;
+      --panel-2: #221b45;
+      --raised: #2b2358;
+      --line: #3a3068;
+      --line-soft: #2a2350;
+      --text: #f5f2ff;
+      --muted: #a9a1cf;
+      --faint: #7f77ab;
+      --accent: #8b5cf6;
+      --accent-hi: #a78bfa;
+      --gold: #fbbf24;
+      --gold-hi: #fcd34d;
+      --good: #34d399;
+      --bad: #fb7185;
+      --radius: 18px;
+      --shadow: 0 10px 30px rgba(5, 2, 20, .45);
+      --font: ui-rounded, "SF Pro Rounded", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; }
+    html { -webkit-text-size-adjust: 100%; scrollbar-color: var(--line) transparent; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: var(--font);
+      color: var(--text);
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+      background:
+        radial-gradient(900px 520px at 12% -8%, rgba(139, 92, 246, .24), transparent 60%),
+        radial-gradient(700px 480px at 100% 0%, rgba(251, 191, 36, .10), transparent 55%),
+        var(--bg);
+      background-attachment: fixed;
+    }
+    [hidden] { display: none !important; }
+    h1, h2, h3, p, ul, ol { margin: 0; }
+    button, input { font: inherit; color: inherit; }
+    button { cursor: pointer; }
+    button:disabled { cursor: not-allowed; }
+    img { display: block; }
+    code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .92em; color: var(--text); }
+    ::selection { background: var(--accent); color: #fff; }
+    :focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+    .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+    .muted { color: var(--muted); }
+    .pulse { animation: pulse 1.6s ease-in-out infinite; }
+    .txt-good { color: #6ee7b7; font-weight: 800; }
+    .txt-gold { color: var(--gold-hi); font-weight: 800; }
+
+    /* ---------- Buttons & inputs ---------- */
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: .5rem;
+      border: 1px solid transparent; border-radius: 12px;
+      padding: .7rem 1.1rem; font-weight: 700; font-size: .95rem; line-height: 1.2;
+      transition: transform .12s, background .15s, border-color .15s, box-shadow .15s, opacity .15s, filter .15s;
+      user-select: none; white-space: nowrap;
+    }
+    .btn:active:not(:disabled) { transform: scale(.97); }
+    .btn:disabled { opacity: .45; }
+    .btn-primary { background: linear-gradient(135deg, #9466f8, #6d3ff0); color: #fff; box-shadow: 0 6px 18px rgba(139, 92, 246, .35); }
+    .btn-primary:hover:not(:disabled) { filter: brightness(1.1); }
+    .btn-gold { background: linear-gradient(135deg, var(--gold-hi), var(--gold)); color: #2a1a00; box-shadow: 0 6px 18px rgba(251, 191, 36, .25); }
+    .btn-gold:hover:not(:disabled) { filter: brightness(1.07); }
+    .btn-ghost { background: var(--panel-2); border-color: var(--line); color: var(--text); }
+    .btn-ghost:hover:not(:disabled) { background: var(--raised); }
+    .btn-danger { background: rgba(251, 113, 133, .12); border-color: rgba(251, 113, 133, .4); color: #fda4af; }
+    .btn-danger:hover:not(:disabled) { background: rgba(251, 113, 133, .22); }
+    .btn-white { background: #fff; color: #9f1239; }
+    .btn-sm { padding: .45rem .8rem; font-size: .82rem; border-radius: 10px; }
+    .btn-block { width: 100%; }
+    .link-btn { background: none; border: 0; padding: 0; color: var(--muted); text-decoration: underline; font-size: .85rem; }
+    .link-btn:hover { color: var(--text); }
+    .link-btn.armed { color: #fda4af; font-weight: 700; }
+    .count { background: var(--accent); color: #fff; border-radius: 999px; padding: 0 .5rem; font-size: .75rem; font-weight: 800; }
+
+    .input {
+      width: 100%; background: var(--bg); border: 1px solid var(--line); border-radius: 12px;
+      padding: .7rem .9rem; color: var(--text); font-size: .95rem;
+      transition: border-color .15s, box-shadow .15s;
+    }
+    .input::placeholder { color: var(--faint); }
+    .input:focus { outline: none; border-color: var(--accent-hi); box-shadow: 0 0 0 3px rgba(139, 92, 246, .3); }
+    .input:disabled { opacity: .6; }
+    .input-sm { padding: .4rem .65rem; font-size: .85rem; border-radius: 9px; }
+
+    .panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 1.25rem; box-shadow: var(--shadow); }
+    .eyebrow { font-size: .7rem; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: var(--accent-hi); }
+    .alert { border-radius: 14px; padding: .8rem 1rem; font-size: .9rem; }
+    .alert-bad { border: 1px solid rgba(251, 113, 133, .45); background: rgba(159, 18, 57, .25); color: #fecdd3; }
+    .alert-warn { border: 1px solid rgba(251, 191, 36, .4); background: rgba(120, 80, 0, .25); color: #fde68a; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .75rem; }
+
+    /* ---------- Header ---------- */
+    .sticky-top { position: sticky; top: 0; z-index: 40; }
+    .banner { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: .55rem 1rem; background: #9f1239; color: #fff; font-size: .88rem; font-weight: 600; }
+    .banner-actions { display: flex; gap: 8px; flex-shrink: 0; }
+    .topbar { background: rgba(13, 10, 26, .82); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); border-bottom: 1px solid var(--line-soft); }
+    .topbar-inner { max-width: 1200px; margin: 0 auto; padding: .7rem 1rem; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .brand { display: flex; align-items: center; gap: .75rem; min-width: 0; }
+    .logo { width: 42px; height: 42px; flex-shrink: 0; border-radius: 13px; display: grid; place-items: center; font-size: 1.4rem; background: linear-gradient(135deg, var(--accent), #c026d3); box-shadow: 0 6px 18px rgba(139, 92, 246, .4), inset 0 1px 0 rgba(255, 255, 255, .25); }
+    .brand h1 { font-size: 1.4rem; font-weight: 900; letter-spacing: -.02em; line-height: 1; }
+    .the-great { display: block; margin-bottom: .22rem; font-size: .6rem; font-weight: 800; letter-spacing: .24em; text-transform: uppercase; color: var(--gold-hi); }
+    .topbar-actions { display: flex; align-items: center; gap: .6rem; flex-shrink: 0; }
+    .badge { display: inline-flex; align-items: center; gap: .5rem; padding: .3rem .7rem; border-radius: 999px; font-size: .78rem; font-weight: 600; border: 1px solid var(--line); background: var(--panel-2); color: var(--muted); }
+    .badge .dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+    .badge-good { color: #6ee7b7; border-color: rgba(52, 211, 153, .4); background: rgba(52, 211, 153, .1); }
+    .badge-good .dot { animation: pulse 1.6s ease-in-out infinite; }
+    .badge-warn { color: #fcd34d; border-color: rgba(251, 191, 36, .4); background: rgba(251, 191, 36, .1); }
+    .badge-bad { color: #fda4af; border-color: rgba(251, 113, 133, .4); background: rgba(251, 113, 133, .1); }
+
+    main { max-width: 1200px; margin: 0 auto; padding: 1.5rem 1rem 4rem; }
+
+    /* ---------- Lobby ---------- */
+    .hero { text-align: center; max-width: 640px; margin: 1.5rem auto 2rem; }
+    .hero h2 { font-size: clamp(2.2rem, 6vw, 3.6rem); font-weight: 900; letter-spacing: -.035em; line-height: 1.05; }
+    .grad { background: linear-gradient(100deg, var(--gold-hi), #f472b6 55%, var(--accent-hi)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+    .hero p { margin-top: 1rem; color: var(--muted); font-size: 1.05rem; }
+    .lobby-wrap { max-width: 820px; margin: 0 auto; }
+    .lobby-grid { display: grid; gap: 1rem; }
+    .option { display: flex; flex-direction: column; gap: 1rem; }
+    .option h3 { font-size: 1.25rem; font-weight: 800; margin-top: .15rem; }
+    .option p { color: var(--muted); font-size: .92rem; }
+    .option form, .option .stack { margin-top: auto; display: flex; flex-direction: column; gap: .75rem; }
+    .code-box { background: var(--bg); border: 1px dashed var(--accent); border-radius: 14px; padding: .9rem; text-align: center; }
+    .code-box .eyebrow { color: var(--muted); }
+    .code { display: block; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 1.4rem; font-weight: 800; letter-spacing: .06em; color: var(--gold-hi); word-break: break-all; margin: .2rem 0 .8rem; user-select: all; }
+    .row { display: flex; flex-wrap: wrap; gap: .5rem; justify-content: center; }
+    .waiting { color: #fcd34d; font-size: .85rem; text-align: center; }
+    .steps { display: grid; gap: .75rem; margin: 1.5rem 0 0; padding: 0; list-style: none; counter-reset: s; }
+    .steps li { counter-increment: s; position: relative; background: rgba(255, 255, 255, .03); border: 1px solid var(--line-soft); border-radius: 14px; padding: 1rem 1rem 1rem 3.3rem; font-size: .9rem; color: var(--muted); }
+    .steps li::before { content: counter(s); position: absolute; left: 1rem; top: 1rem; width: 1.65rem; height: 1.65rem; border-radius: 50%; display: grid; place-items: center; background: var(--accent); color: #fff; font-weight: 800; font-size: .85rem; }
+    .steps strong { display: block; color: var(--text); margin-bottom: .1rem; }
+    .notes { margin-top: 1.25rem; color: var(--muted); font-size: .88rem; }
+    .notes summary { cursor: pointer; color: var(--text); user-select: none; }
+    .notes ul { margin-top: .75rem; padding-left: 1.2rem; display: flex; flex-direction: column; gap: .5rem; }
+
+    /* ---------- Shared tile art ---------- */
+    .art { position: relative; display: block; width: 100%; aspect-ratio: 1; border-radius: 12px; overflow: hidden; background: var(--bg); margin-bottom: .45rem; }
+    .art img { width: 100%; height: 100%; object-fit: cover; transition: filter .25s, transform .3s; }
+    /* names and taglines wrap to two lines rather than being cut off after a few letters */
+    .nm, .tg { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; width: 100%; overflow: hidden; overflow-wrap: anywhere; }
+    .nm { font-weight: 800; font-size: .86rem; line-height: 1.25; }
+    .tg { font-size: .74rem; line-height: 1.3; color: var(--muted); margin-top: .1rem; }
+    .pick-grid, .board-grid { display: grid; gap: .75rem; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); }
+
+    /* ---------- Selection ---------- */
+    .select-head { text-align: center; margin-bottom: 1.25rem; }
+    .select-head h2 { font-size: 1.7rem; font-weight: 900; letter-spacing: -.02em; }
+    .select-head p { color: var(--muted); font-size: .92rem; max-width: 560px; margin: .35rem auto 0; }
+    .pill { display: inline-flex; flex-wrap: wrap; justify-content: center; gap: .4rem; margin-top: 1rem; padding: .4rem .95rem; border-radius: 999px; font-size: .82rem; font-weight: 600; background: var(--bg); border: 1px solid var(--line); color: var(--muted); }
+    .pick { background: var(--panel); border: 2px solid var(--line-soft); border-radius: 16px; padding: .65rem; display: flex; flex-direction: column; align-items: center; text-align: center; transition: transform .15s, border-color .15s, box-shadow .15s, opacity .2s; }
+    .pick:hover:not(:disabled) { transform: translateY(-3px); border-color: var(--accent-hi); }
+    .pick.selected { border-color: var(--gold); box-shadow: 0 0 0 3px rgba(251, 191, 36, .22); transform: translateY(-3px); }
+    .pick:disabled { cursor: default; }
+    .pick:disabled:not(.selected) { opacity: .35; }
+    .lockbar { position: sticky; bottom: 16px; z-index: 20; max-width: 540px; margin: 1.25rem auto 0; display: flex; align-items: center; gap: .9rem; padding: .7rem .8rem; background: rgba(26, 21, 53, .96); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); border: 1px solid var(--gold); border-radius: 18px; box-shadow: 0 12px 40px rgba(0, 0, 0, .55); animation: rise .25s ease; }
+    .lockbar img { width: 48px; height: 48px; border-radius: 12px; flex-shrink: 0; }
+    .lockbar .info { flex: 1; min-width: 0; }
+    .lockbar .info b { display: block; font-size: 1rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    /* ---------- Game ---------- */
+    .game { display: grid; gap: 1.25rem; grid-template-columns: minmax(0, 1fr); }
+    .board-col { display: flex; flex-direction: column; gap: 1rem; min-width: 0; }
+    .hud { display: flex; flex-direction: column; gap: .9rem; padding: 1rem; }
+    .hud-top, .hud-bottom { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .9rem; }
+    .hud-bottom { border-top: 1px solid var(--line-soft); padding-top: .9rem; }
+    .secret-chip { display: flex; align-items: center; gap: .8rem; min-width: 0; }
+    .secret-avatar { position: relative; flex-shrink: 0; }
+    .secret-avatar img { width: 52px; height: 52px; border-radius: 14px; box-shadow: 0 0 0 2px var(--accent); background: var(--bg); }
+    .you-tag { position: absolute; right: -6px; bottom: -6px; background: var(--accent); color: #fff; font-size: .62rem; font-weight: 800; padding: .05rem .4rem; border-radius: 999px; text-transform: uppercase; }
+    .secret-chip .name { font-weight: 800; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .secret-chip .sub { font-size: .78rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .secret-chip > div:last-child { min-width: 0; }
+    .stats { display: flex; gap: .5rem; }
+    .stat { background: var(--bg); border: 1px solid var(--line-soft); border-radius: 12px; padding: .3rem .75rem; text-align: center; min-width: 64px; }
+    .stat-label { display: block; font-size: .62rem; text-transform: uppercase; letter-spacing: .08em; color: var(--faint); font-weight: 700; }
+    .stat-value { font-weight: 800; font-size: 1.05rem; }
+    .turn { display: flex; align-items: center; gap: .7rem; min-width: 0; }
+    .turn-dot { width: 12px; height: 12px; flex-shrink: 0; border-radius: 50%; background: var(--faint); }
+    .turn.mine .turn-dot { background: var(--good); animation: ring 1.8s infinite; }
+    .turn-title { font-weight: 800; line-height: 1.2; }
+    .turn.mine .turn-title { color: #6ee7b7; }
+    .turn-sub { font-size: .8rem; color: var(--muted); }
+    .hud-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
+    .guess-banner { display: flex; align-items: center; justify-content: space-between; gap: .75rem; background: rgba(251, 191, 36, .12); border: 1px solid rgba(251, 191, 36, .45); color: var(--gold-hi); border-radius: 12px; padding: .55rem .9rem; font-weight: 600; font-size: .9rem; }
+    .hint { color: var(--faint); font-size: .8rem; text-align: center; }
+
+    .tile-btn { width: 100%; background: var(--panel); border: 2px solid var(--line-soft); border-radius: 16px; padding: .6rem; display: flex; flex-direction: column; align-items: center; text-align: center; transition: transform .2s, opacity .25s, border-color .15s, background .2s, box-shadow .15s; }
+    .tile-btn:hover { border-color: var(--accent-hi); }
+    .tile-x { position: absolute; inset: 0; display: grid; place-items: center; font-size: 2.4rem; font-weight: 900; color: var(--bad); background: rgba(13, 10, 26, .62); opacity: 0; transform: scale(.6); transition: opacity .2s, transform .25s; }
+    .tile.out .tile-btn { opacity: .5; background: var(--bg-soft); transform: scale(.95); }
+    .tile.out .tile-x { opacity: 1; transform: none; }
+    .tile.out .art img { filter: grayscale(1); }
+    .tile.out .nm { text-decoration: line-through; color: var(--faint); }
+    .board-grid.guessing .tile-btn { cursor: crosshair; border-color: rgba(251, 191, 36, .45); }
+    .board-grid.guessing .tile-btn:hover { border-color: var(--gold); box-shadow: 0 0 0 3px rgba(251, 191, 36, .3); transform: translateY(-2px); opacity: 1; }
+
+    /* ---------- Chat ---------- */
+    .chat { display: flex; flex-direction: column; height: 480px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow); }
+    .chat-head { display: flex; align-items: center; justify-content: space-between; gap: .5rem; padding: .8rem 1rem; border-bottom: 1px solid var(--line-soft); font-weight: 800; }
+    .chat-head small { font-weight: 500; color: var(--muted); font-size: .75rem; }
+    .chat-body { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
+    .chat-log { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: .9rem; display: flex; flex-direction: column; gap: .55rem; font-size: .9rem; scrollbar-width: thin; }
+    .chat-more { position: absolute; left: 50%; bottom: .6rem; transform: translateX(-50%); z-index: 2; padding: .35rem .85rem; border: 0; border-radius: 999px; background: var(--accent); color: #fff; font-size: .78rem; font-weight: 800; box-shadow: 0 6px 18px rgba(0, 0, 0, .5); }
+    .chat-more:hover { filter: brightness(1.1); }
+    .msg { max-width: 88%; padding: .5rem .75rem; border-radius: 14px; overflow-wrap: anywhere; }
+    .msg .who { display: block; font-size: .7rem; font-weight: 700; margin-bottom: .1rem; }
+    .msg.me { align-self: flex-end; background: linear-gradient(135deg, #8b5cf6, #6d3ff0); border-bottom-right-radius: 4px; }
+    .msg.me .who { color: #ddd6fe; }
+    .msg.them { align-self: flex-start; background: var(--raised); border-bottom-left-radius: 4px; }
+    .msg.them .who { color: #6ee7b7; }
+    .msg.sys { align-self: center; max-width: 100%; color: var(--muted); font-size: .78rem; text-align: center; border: 1px dashed var(--line-soft); padding: .35rem .7rem; }
+    .quick { display: grid; grid-template-columns: repeat(4, 1fr); gap: .4rem; padding: .55rem .65rem; border-top: 1px solid var(--line-soft); background: rgba(0, 0, 0, .15); }
+    .quick button { padding: .45rem .2rem; border-radius: 10px; font-size: .78rem; font-weight: 700; border: 1px solid; background: transparent; transition: transform .1s, background .15s; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .quick button:active { transform: scale(.95); }
+    .q-yes { color: #6ee7b7; border-color: rgba(52, 211, 153, .4); background: rgba(52, 211, 153, .1); }
+    .q-no { color: #fda4af; border-color: rgba(251, 113, 133, .4); background: rgba(251, 113, 133, .1); }
+    .q-maybe { color: #fcd34d; border-color: rgba(251, 191, 36, .4); background: rgba(251, 191, 36, .1); }
+    .q-unsure { color: var(--muted); border-color: var(--line); background: rgba(255, 255, 255, .04); }
+    .quick button:hover { filter: brightness(1.25); }
+    .chat-form { display: flex; gap: .5rem; padding: .65rem; border-top: 1px solid var(--line-soft); }
+    #chat-pill { position: fixed; right: 1rem; bottom: 5rem; z-index: 45; box-shadow: 0 10px 30px rgba(0, 0, 0, .5); border-radius: 999px; }
+
+    @media (min-width: 1024px) {
+      .game { grid-template-columns: minmax(0, 1fr) 340px; align-items: start; }
+      .chat { position: sticky; top: calc(var(--sticky-h, 68px) + 16px); height: calc(100vh - var(--sticky-h, 68px) - 32px); max-height: 760px; }
+    }
+    @media (min-width: 720px) {
+      .lobby-grid { grid-template-columns: 1fr 1fr; }
+      .steps { grid-template-columns: repeat(3, 1fr); }
+    }
+    @media (max-width: 520px) {
+      #conn-status-text { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); }
+      .pick-grid, .board-grid { grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: .55rem; }
+      .hud-actions .btn { flex: 1; }
+    }
+
+    /* ---------- Modals ---------- */
+    .modal { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center; padding: 1rem; background: rgba(6, 3, 16, .8); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); animation: fade .15s ease; }
+    .modal-card { width: 100%; max-width: 420px; max-height: 92vh; overflow: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 22px; padding: 1.5rem; text-align: center; box-shadow: 0 30px 80px rgba(0, 0, 0, .6); animation: pop .2s ease; display: flex; flex-direction: column; gap: 1rem; }
+    .modal-card h3 { font-size: 1.3rem; font-weight: 900; }
+    .modal-icon { width: 60px; height: 60px; margin: 0 auto; border-radius: 18px; display: grid; place-items: center; font-size: 1.9rem; border: 1px solid transparent; }
+    .ic-good { background: rgba(52, 211, 153, .15); border-color: rgba(52, 211, 153, .4); }
+    .ic-bad { background: rgba(251, 113, 133, .15); border-color: rgba(251, 113, 133, .4); }
+    .ic-warn { background: rgba(251, 191, 36, .15); border-color: rgba(251, 191, 36, .4); }
+    .person { display: flex; align-items: center; gap: .75rem; text-align: left; padding: .7rem; background: var(--bg); border: 1px solid var(--line-soft); border-radius: 14px; min-width: 0; }
+    .person img { width: 48px; height: 48px; border-radius: 12px; flex-shrink: 0; background: var(--panel-2); }
+    .person > div { min-width: 0; }
+    .person .nm { font-size: .95rem; }
+    .reveal { display: grid; grid-template-columns: 1fr 1fr; gap: .6rem; }
+    .reveal .person { flex-direction: column; text-align: center; padding: .8rem .5rem; }
+    .reveal .person img { width: 56px; height: 56px; }
+    .reveal .eyebrow { color: var(--muted); font-size: .65rem; }
+    .score-line { font-weight: 800; font-size: 1.05rem; }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; }
+    .stack-sm { display: flex; flex-direction: column; gap: .5rem; }
+    #gameover-modal { background: rgba(6, 3, 16, .86); }
+
+    .modal-card.wide { max-width: 760px; padding: 0; gap: 0; max-height: 90vh; overflow: hidden; text-align: left; }
+    .m-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; padding: 1.1rem 1.25rem; border-bottom: 1px solid var(--line-soft); }
+    .m-head p { font-size: .82rem; color: var(--muted); margin-top: .15rem; }
+    .m-close { background: none; border: 0; color: var(--muted); font-size: 1.2rem; padding: .2rem .5rem; border-radius: 8px; }
+    .m-close:hover { color: var(--text); background: var(--panel-2); }
+    .m-body { flex: 1; min-height: 0; overflow-y: auto; }
+    .m-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .75rem; padding: .9rem 1.25rem; border-top: 1px solid var(--line-soft); background: rgba(0, 0, 0, .2); }
+    .m-foot .links { display: flex; flex-wrap: wrap; gap: .4rem 1.1rem; }
+    .add-box { padding: 1rem 1.25rem; background: rgba(0, 0, 0, .18); border-bottom: 1px solid var(--line-soft); }
+    .add-form { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
+    .add-form .input { flex: 1 1 150px; min-width: 0; }
+    .look-btn { flex-shrink: 0; border: 1px solid var(--line); background: var(--bg); border-radius: 13px; padding: 3px; transition: border-color .15s; }
+    .look-btn:hover { border-color: var(--accent-hi); }
+    .look-btn img { width: 42px; height: 42px; border-radius: 10px; }
+    .add-hint { margin-top: .5rem; font-size: .78rem; color: var(--faint); }
+    .cast-list { padding: 1rem 1.25rem; display: flex; flex-direction: column; gap: .6rem; }
+    .cast-row { background: var(--bg); border: 1px solid var(--line-soft); border-radius: 14px; padding: .6rem; }
+    .cast-row-top { display: flex; align-items: center; gap: .7rem; }
+    .cast-avatar { width: 44px; height: 44px; border-radius: 11px; flex-shrink: 0; background: var(--panel-2); }
+    .cast-fields { flex: 1; min-width: 0; display: grid; grid-template-columns: 1fr 1fr; gap: .4rem; }
+    .cast-actions { display: flex; gap: .4rem; flex-shrink: 0; }
+    @media (max-width: 600px) {
+      .cast-row-top { flex-wrap: wrap; }
+      .cast-fields { grid-template-columns: 1fr; flex-basis: calc(100% - 60px); }
+      .cast-actions { margin-left: 56px; }
+    }
+
+    /* look editor */
+    .look-editor { margin-top: .6rem; padding: .85rem; border-radius: 14px; background: var(--bg-soft); border: 1px solid var(--line-soft); display: flex; flex-direction: column; gap: 1rem; }
+    .look-head { display: flex; align-items: center; gap: .8rem; font-size: .8rem; color: var(--muted); }
+    .look-head img { width: 64px; height: 64px; border-radius: 14px; flex-shrink: 0; border: 1px solid var(--line); }
+    .look-label { font-size: .7rem; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin-bottom: .45rem; }
+    .swatches, .emoji-grid, .look-row { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; }
+    .swatch { width: 28px; height: 28px; border-radius: 50%; border: 2px solid transparent; transition: transform .12s; }
+    .swatch:hover { transform: scale(1.12); }
+    .swatch[aria-pressed="true"] { border-color: #fff; }
+    .chip { font-size: .78rem; padding: .35rem .65rem; border-radius: 9px; background: var(--panel-2); border: 1px solid var(--line); color: var(--text); transition: background .15s; }
+    .chip:hover { background: var(--raised); }
+    .chip[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--accent-hi); }
+    .emoji-btn { width: 36px; height: 36px; border-radius: 9px; background: transparent; border: 1px solid transparent; font-size: 1.3rem; line-height: 1; }
+    .emoji-btn:hover { background: var(--panel-2); }
+    .emoji-btn[aria-pressed="true"] { background: rgba(139, 92, 246, .35); border-color: var(--accent-hi); }
+    .look-row .input { width: auto; flex: 1 1 170px; }
+    .look-row .input.emoji-in { flex: 0 0 190px; }
+    .tiny { font-size: .75rem; color: var(--faint); }
+    .tiny.amber { color: #fcd34d; }
+
+    /* ---------- Toasts, confetti ---------- */
+    #toast-container { position: fixed; left: 50%; bottom: 1rem; transform: translateX(-50%); z-index: 70; display: flex; flex-direction: column; gap: .5rem; align-items: center; width: calc(100% - 2rem); max-width: 460px; pointer-events: none; }
+    .toast { pointer-events: auto; display: flex; align-items: center; gap: .75rem; padding: .6rem 1rem; border-radius: 14px; border: 1px solid var(--line); background: var(--panel-2); color: var(--text); font-size: .88rem; font-weight: 600; box-shadow: 0 12px 30px rgba(0, 0, 0, .5); transition: opacity .3s, transform .3s; }
+    .toast.enter { opacity: 0; transform: translateY(8px); }
+    .toast.success { background: #06281f; border-color: #0f6b4f; color: #a7f3d0; }
+    .toast.error { background: #31101a; border-color: #9f1239; color: #fecdd3; }
+    .toast.warning { background: #33250a; border-color: #a16207; color: #fde68a; }
+    .toast-action { background: rgba(255, 255, 255, .14); border: 0; border-radius: 8px; padding: .25rem .6rem; font-weight: 800; font-size: .8rem; }
+    .toast-action:hover { background: rgba(255, 255, 255, .25); }
+    #confetti { position: fixed; inset: 0; z-index: 60; overflow: hidden; pointer-events: none; }
+    #confetti i { position: absolute; top: -16px; width: 9px; height: 15px; border-radius: 2px; animation: fall linear forwards; }
+
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+    @keyframes ring { 0% { box-shadow: 0 0 0 0 rgba(52, 211, 153, .6); } 70% { box-shadow: 0 0 0 9px rgba(52, 211, 153, 0); } 100% { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0); } }
+    @keyframes fade { from { opacity: 0; } }
+    @keyframes pop { from { opacity: 0; transform: translateY(12px) scale(.96); } }
+    @keyframes rise { from { opacity: 0; transform: translateY(16px); } }
+    @keyframes fall { to { transform: translate(var(--dx, 0), 108vh) rotate(720deg); } }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
+    }
+  </style>
+</head>
+<body>
+  <noscript><p style="padding:1rem;margin:0;background:#9f1239;color:#fff">The Great Whodini needs JavaScript to work. Please turn it on for this page and reload.</p></noscript>
+
+  <div id="sticky-top" class="sticky-top">
+    <!-- Shown when the other player drops -->
+    <div id="disconnect-banner" class="banner" role="alert" hidden>
+      <span id="disconnect-banner-text">Your opponent disconnected.</span>
+      <div class="banner-actions">
+        <button type="button" class="btn btn-white btn-sm" onclick="resetSession()">New game</button>
+        <button type="button" class="btn btn-sm" style="background:rgba(0,0,0,.25);color:#fff" onclick="dismissDisconnectBanner()">Dismiss</button>
+      </div>
+    </div>
+
+    <header class="topbar">
+      <div class="topbar-inner">
+        <div class="brand">
+          <div class="logo" aria-hidden="true">🎩</div>
+          <h1><span class="the-great">The Great</span> Whodini</h1>
+        </div>
+        <div class="topbar-actions">
+          <div id="connection-badge" class="badge" role="status" hidden>
+            <span id="conn-dot" class="dot"></span>
+            <span id="conn-status-text"></span>
+          </div>
+          <button type="button" id="open-roster-btn" class="btn btn-ghost btn-sm" onclick="openRosterModal()">
+            <span aria-hidden="true">🎭</span> Cast <span id="roster-count-badge" class="count">24</span>
+          </button>
+        </div>
+      </div>
+    </header>
+  </div>
+
+  <main>
+
+    <!-- ============ SCREEN 1: LOBBY ============ -->
+    <section id="lobby-view">
+      <div class="hero">
+        <h2>Pick a secret.<br><span class="grad">Crack theirs.</span></h2>
+        <p>A guessing game for two. It all runs in your browser, so there's nothing to sign up for or install. Send a friend a room code and start asking questions.</p>
+      </div>
+
+      <div class="lobby-wrap">
+        <p id="lobby-error" role="alert" class="alert alert-bad" style="margin-bottom:1rem" hidden></p>
+
+        <div class="lobby-grid">
+          <!-- Host -->
+          <div class="panel option">
+            <div>
+              <span class="eyebrow">Option A</span>
+              <h3>Host a game</h3>
+            </div>
+            <p>Start a room and send the code to a friend. You'll both play with your cast of characters.</p>
+
+            <div id="host-action-area" class="stack">
+              <button type="button" id="host-btn" onclick="initializeHost()" class="btn btn-primary btn-block"><span>Create a room</span></button>
+            </div>
+
+            <div id="host-room-info" class="stack" hidden>
+              <div class="code-box">
+                <span class="eyebrow">Room code</span>
+                <span id="display-room-code" class="code">…</span>
+                <div class="row">
+                  <button type="button" class="btn btn-ghost btn-sm" onclick="copyRoomCode()">Copy code</button>
+                  <button type="button" id="copy-invite-btn" class="btn btn-ghost btn-sm" onclick="copyInviteLink()" hidden>Copy link</button>
+                  <button type="button" id="share-btn" class="btn btn-ghost btn-sm" onclick="shareInvite()" hidden>Share…</button>
+                </div>
+              </div>
+              <p class="waiting pulse">Waiting for your friend to join…</p>
+              <button type="button" class="link-btn" onclick="resetSession()">Close this room</button>
+            </div>
+          </div>
+
+          <!-- Join -->
+          <div class="panel option">
+            <div>
+              <span class="eyebrow">Option B</span>
+              <h3>Join a game</h3>
+            </div>
+            <p>Got a code from a friend? Paste it here, or just open the invite link they sent you. You'll play with their characters.</p>
+            <form onsubmit="handleJoinSubmit(event)">
+              <label for="join-code-input" class="sr-only">Room code</label>
+              <input id="join-code-input" class="input" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="40" placeholder="who-k7x2m-9qpwe">
+              <button type="submit" id="join-btn" class="btn btn-gold btn-block"><span>Join game</span></button>
+            </form>
+          </div>
+        </div>
+
+        <ol class="steps">
+          <li><strong>Pick a secret</strong>You each choose one character from the board and keep it to yourself.</li>
+          <li><strong>Ask away</strong>Take turns asking yes/no questions in the chat, and flip down anyone who's ruled out.</li>
+          <li><strong>Take your shot</strong>Name their character and you win. Get it wrong and your opponent does, so be sure.</li>
+        </ol>
+
+        <details class="notes">
+          <summary>Privacy and connection notes</summary>
+          <ul>
+            <li>Your chat and the game itself go straight from one browser to the other, encrypted. They never pass through the room server.</li>
+            <li>The free PeerJS server (0.peerjs.com) only helps the two of you find each other. It sees the room code and both IP addresses while you connect. Your opponent can see your IP address too, because that's how peer-to-peer works.</li>
+            <li>Colors, emoji and initials are drawn on your own device. Photos and GIFs you upload are shrunk where needed and sent straight to your opponent. If a character uses a picture from a web link, the person joining gets asked before it loads, since loading it shows their IP address to that site.</li>
+            <li>If it won't connect, a strict firewall or VPN is usually the reason. Try a different network, like a phone hotspot. Someone technical can also set up a TURN relay (see <code>CUSTOM_ICE_SERVERS</code> in the file).</li>
+          </ul>
+        </details>
+      </div>
+    </section>
+
+    <!-- ============ SCREEN 2: PICK YOUR SECRET ============ -->
+    <section id="selection-view" hidden>
+      <div class="select-head">
+        <h2>Choose your secret character</h2>
+        <p>This is the one your opponent has to guess. They only get a fingerprint of your pick, so neither of you can change your mind later.</p>
+        <div id="selection-status-badge" class="pill" role="status"></div>
+      </div>
+
+      <div id="remote-photo-banner" class="alert alert-warn" style="margin-bottom:1rem" hidden>
+        <span>Some of the host's characters use pictures hosted on <strong id="remote-photo-hosts">other sites</strong>. Loading them lets those sites see your IP address, so they're hidden for now.</span>
+        <button type="button" class="btn btn-gold btn-sm" onclick="allowRemotePhotosNow()">Load them</button>
+      </div>
+
+      <div id="selection-grid" class="pick-grid" role="group" aria-label="Characters"></div>
+
+      <div id="lock-bar" class="lockbar" hidden>
+        <img id="lock-avatar" src="" alt="">
+        <div class="info">
+          <span class="eyebrow" id="lock-label">Your secret</span>
+          <b id="lock-name">—</b>
+        </div>
+        <button type="button" id="lock-btn" class="btn btn-gold" onclick="lockInSecret()">🔒 Lock in</button>
+        <span id="lock-wait" class="muted pulse" style="font-size:.85rem;font-weight:600" hidden>Waiting…</span>
+      </div>
+    </section>
+
+    <!-- ============ SCREEN 3: THE BOARD ============ -->
+    <section id="game-view" class="game" hidden>
+      <div class="board-col">
+        <div class="panel hud">
+          <div class="hud-top">
+            <div class="secret-chip">
+              <div class="secret-avatar">
+                <img id="my-secret-avatar" src="" alt="">
+                <span class="you-tag">You</span>
+              </div>
+              <div>
+                <div class="eyebrow">Your secret</div>
+                <div id="my-secret-name" class="name">—</div>
+                <div id="my-secret-tag" class="sub"></div>
+              </div>
+            </div>
+            <div class="stats">
+              <div class="stat"><span class="stat-label">Round</span><span id="round-count" class="stat-value">1</span></div>
+              <div class="stat"><span class="stat-label">Score</span><span id="score-text" class="stat-value">0 – 0</span></div>
+              <div class="stat"><span class="stat-label">In play</span><span id="remaining-count" class="stat-value">0</span></div>
+            </div>
+          </div>
+
+          <div class="hud-bottom">
+            <div id="turn-indicator" class="turn" role="status">
+              <span class="turn-dot" aria-hidden="true"></span>
+              <div>
+                <div id="turn-title" class="turn-title">—</div>
+                <div id="turn-sub" class="turn-sub"></div>
+              </div>
+            </div>
+            <div class="hud-actions">
+              <button type="button" id="remote-photo-btn" class="btn btn-ghost btn-sm" onclick="allowRemotePhotosNow()" hidden>Load linked photos</button>
+              <button type="button" class="btn btn-ghost btn-sm" onclick="resetBoardEliminations()">Reset board</button>
+              <button type="button" id="guess-mode-btn" class="btn btn-gold btn-sm" onclick="toggleGuessMode()" aria-pressed="false">🎯 Final guess</button>
+              <button type="button" id="end-turn-btn" class="btn btn-primary btn-sm" onclick="endTurn()">End turn →</button>
+            </div>
+          </div>
+
+          <div id="guess-banner" class="guess-banner" hidden>
+            <span>🎯 Tap the character you think is theirs.</span>
+            <button type="button" class="btn btn-ghost btn-sm" onclick="setGuessMode(false)">Cancel</button>
+          </div>
+
+          <div id="over-banner" class="guess-banner" hidden>
+            <span id="over-banner-text">Round over.</span>
+            <button type="button" class="btn btn-gold btn-sm" onclick="reopenResults()">Results</button>
+          </div>
+        </div>
+
+        <div id="board-grid" class="board-grid"></div>
+        <p class="hint">Tap a character to flip them down, and tap again to bring them back. Think you know who it is? Hit <b>Final guess</b>.</p>
+      </div>
+
+      <aside id="chat-aside" class="chat" aria-label="Chat">
+        <div class="chat-head">
+          <span>💬 Chat</span>
+          <small>Ask yes/no questions</small>
+        </div>
+        <div class="chat-body">
+          <div id="chat-messages" class="chat-log" role="log" aria-live="polite" aria-label="Chat messages" onscroll="onChatScroll()"></div>
+          <button type="button" id="chat-more" class="chat-more" onclick="scrollChatToBottom()" hidden>↓ New messages</button>
+        </div>
+        <div class="quick">
+          <button type="button" class="q-yes" onclick="sendQuickReply('Yes! ✅')">Yes ✅</button>
+          <button type="button" class="q-no" onclick="sendQuickReply('No! ❌')">No ❌</button>
+          <button type="button" class="q-maybe" onclick="sendQuickReply('Maybe 🤔')">Maybe 🤔</button>
+          <button type="button" class="q-unsure" onclick="sendQuickReply('Unsure 🤷')">Unsure 🤷</button>
+        </div>
+        <form class="chat-form" onsubmit="handleChatSubmit(event)">
+          <label for="chat-input" class="sr-only">Message</label>
+          <input id="chat-input" class="input" type="text" autocomplete="off" maxlength="300" placeholder="Ask a question…">
+          <button type="submit" class="btn btn-primary">Send</button>
+        </form>
+      </aside>
+    </section>
+
+  </main>
+
+  <button type="button" id="chat-pill" class="btn btn-primary" onclick="jumpToChat()" hidden>💬 New message ↓</button>
+
+  <!-- ============ MODAL: CONFIRM FINAL GUESS ============ -->
+  <div id="accusation-modal" class="modal" data-escape="closeAccusationModal" role="dialog" aria-modal="true" aria-labelledby="accuse-title" hidden>
+    <div class="modal-card">
+      <div class="modal-icon ic-warn" aria-hidden="true">🎯</div>
+      <div>
+        <h3 id="accuse-title">Make your final guess?</h3>
+        <p class="muted" style="font-size:.92rem;margin-top:.25rem">Is this your opponent's secret character?</p>
+      </div>
+      <div class="person">
+        <img id="accuse-modal-avatar" src="" alt="">
+        <div>
+          <span id="accuse-modal-name" class="nm">—</span>
+          <span id="accuse-modal-tag" class="tg"></span>
+        </div>
+      </div>
+      <p style="font-size:.82rem;color:#fda4af;font-weight:600">Get it right and you win straight away. Get it wrong and your opponent does.</p>
+      <div class="grid-2">
+        <button type="button" id="accuse-cancel-btn" class="btn btn-ghost" onclick="closeAccusationModal()">Not yet</button>
+        <button type="button" id="confirm-accuse-btn" class="btn btn-gold">That's them!</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ MODAL: CAST EDITOR ============ -->
+  <div id="roster-modal" class="modal" data-escape="closeRosterModal" role="dialog" aria-modal="true" aria-labelledby="roster-title" hidden>
+    <div class="modal-card wide">
+      <div class="m-head">
+        <div>
+          <h3 id="roster-title">Your cast</h3>
+          <p>These are the characters on the board. Give each one a color and emoji, or use a photo or GIF. Your cast is saved in this browser, and if you host, you both play with it.</p>
+        </div>
+        <button type="button" class="m-close" onclick="closeRosterModal()" aria-label="Close">✕</button>
+      </div>
+
+      <div class="m-body">
+        <div class="add-box">
+          <form class="add-form" onsubmit="addCharacterFromForm(event)">
+            <button type="button" id="new-look-btn" class="look-btn" onclick="toggleNewLook()" aria-expanded="false" aria-controls="new-look-panel" aria-label="Choose a look (color, emoji or photo)" title="Choose a look">
+              <img id="new-look-preview" src="" alt="">
+            </button>
+            <label for="new-name-input" class="sr-only">Name</label>
+            <input id="new-name-input" class="input" oninput="onNewNameInput(this.value)" type="text" maxlength="60" placeholder="Name (e.g. Captain Waffles)">
+            <label for="new-tag-input" class="sr-only">Tagline</label>
+            <input id="new-tag-input" class="input" type="text" maxlength="60" placeholder="Tagline (e.g. Penguin pilot)">
+            <button type="submit" class="btn btn-primary">+ Add</button>
+          </form>
+          <p class="add-hint">Click the little preview to choose a color and emoji, or to add a photo or GIF. Friends, family, the dog: anyone works.</p>
+          <div id="new-look-panel" hidden></div>
+        </div>
+        <div id="roster-editor-list" class="cast-list"></div>
+      </div>
+
+      <div class="m-foot">
+        <div class="links">
+          <button type="button" id="reset-cast-btn" class="link-btn" onclick="resetRosterToDefaults()">Reset to default cast</button>
+          <button type="button" class="link-btn" onclick="exportRoster()">Export cast</button>
+          <button type="button" class="link-btn" onclick="document.getElementById('roster-import-input').click()">Import cast</button>
+        </div>
+        <button type="button" class="btn btn-primary" onclick="closeRosterModal()">Done</button>
+      </div>
+      <input id="roster-import-input" type="file" accept="application/json,.json" hidden onchange="importRoster(this)">
+    </div>
+  </div>
+
+  <!-- ============ MODAL: GAME OVER ============ -->
+  <div id="gameover-modal" class="modal" data-escape="reviewBoard" role="dialog" aria-modal="true" aria-labelledby="gameover-title" hidden>
+    <div class="modal-card">
+      <div id="gameover-icon" class="modal-icon" aria-hidden="true">🏆</div>
+      <div>
+        <h3 id="gameover-title">You won!</h3>
+        <p id="gameover-message" class="muted" style="font-size:.92rem;margin-top:.25rem"></p>
+      </div>
+      <div class="reveal">
+        <div class="person">
+          <img id="reveal-my-img" src="" alt="">
+          <div><span class="eyebrow">Your secret</span><span id="reveal-my-name" class="nm">—</span></div>
+        </div>
+        <div class="person">
+          <img id="reveal-opp-img" src="" alt="">
+          <div><span class="eyebrow">Their secret</span><span id="reveal-opp-name" class="nm">—</span></div>
+        </div>
+      </div>
+      <p id="gameover-score" class="score-line"></p>
+      <p id="rematch-status" role="status" class="tiny" style="color:var(--accent-hi);min-height:1rem"></p>
+      <div class="stack-sm">
+        <button type="button" id="rematch-btn" class="btn btn-primary btn-block" onclick="requestRematch()">Play another round</button>
+        <div class="row" style="gap:.4rem 1.2rem">
+          <button type="button" class="link-btn" onclick="reviewBoard()">Back to the board and chat</button>
+          <button type="button" class="link-btn" onclick="resetSession()">Leave game</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast-container" role="status" aria-live="polite"></div>
+  <div id="confetti" aria-hidden="true"></div>
+
+  <script>
+    'use strict';
+
+    // =====================================================================
+    // 0. CONFIGURATION
+    // =====================================================================
+    const APP_NAME = 'The Great Whodini';
+    const PROTO_VERSION = 5;                 // both players must run the same protocol
+    const STORAGE_KEY = 'whodini_cast_v1';
+    const CONNECT_TIMEOUT_MS = 30000;
+    const SYNC_TIMEOUT_MS = 15000;
+    const MIN_CAST = 4, MAX_CAST = 48;
+    const MAX_TEXT = 60, MAX_CHAT = 300, MAX_CHAT_NODES = 300;
+    const MAX_PHOTO_CHARS = 40000, MAX_URL_CHARS = 500, PHOTO_PX = 128;
+    // Uploaded GIFs keep their animation only if they're small (about 220 KB as a file), because the
+    // picture travels to your opponent and is saved in this browser. Everything embedded in one cast
+    // shares an overall budget so the saved cast still fits in browser storage.
+    const MAX_GIF_CHARS = 300000, MAX_TOTAL_IMG_CHARS = 3000000;
+    const ROOM_PREFIX = 'who-';
+    const CODE_ALPHABET = 'abcdefghjkmnpqrstuvwxyz23456789'; // 31 chars, no look-alikes
+    const CODE_RE = /^who-[a-z0-9-]{4,32}$/;
+    const BASE_TITLE = document.title;
+
+    // Signaling server: leave empty to use the public PeerJS cloud (0.peerjs.com).
+    // To self-host, e.g. { host: 'peer.example.com', port: 443, path: '/', secure: true }
+    // and add that origin (https + wss) to connect-src in the CSP meta tag above.
+    const PEER_SERVER = {};
+
+    // ICE servers: leave empty to use PeerJS defaults. A strict firewall/NAT that blocks UDP
+    // needs a TURN relay, ideally reachable on 443/TCP. When you set this it REPLACES the defaults,
+    // so keep a STUN entry. Example:
+    //   [{ urls: 'stun:stun.l.google.com:19302' },
+    //    { urls: 'turns:turn.example.com:443?transport=tcp', username: 'user', credential: 'secret' }]
+    const CUSTOM_ICE_SERVERS = [];
+
+    function buildPeerOptions() {
+      const opts = Object.assign({}, PEER_SERVER);
+      if (CUSTOM_ICE_SERVERS.length) opts.config = { iceServers: CUSTOM_ICE_SERVERS };
+      return opts;
+    }
+
+    // Avatar colors (used whenever a character has no photo) and a starter set for the emoji picker.
+    const PALETTE = [
+      { key: 'rose', name: 'Rose', hex: '#e11d48' },
+      { key: 'orange', name: 'Orange', hex: '#ea580c' },
+      { key: 'amber', name: 'Amber', hex: '#d97706' },
+      { key: 'lime', name: 'Lime', hex: '#65a30d' },
+      { key: 'emerald', name: 'Emerald', hex: '#059669' },
+      { key: 'teal', name: 'Teal', hex: '#0d9488' },
+      { key: 'cyan', name: 'Cyan', hex: '#0891b2' },
+      { key: 'sky', name: 'Sky', hex: '#0284c7' },
+      { key: 'indigo', name: 'Indigo', hex: '#4f46e5' },
+      { key: 'violet', name: 'Violet', hex: '#7c3aed' },
+      { key: 'fuchsia', name: 'Fuchsia', hex: '#c026d3' },
+      { key: 'slate', name: 'Slate', hex: '#475569' }
+    ];
+
+    const EMOJI_CHOICES = [
+      '😀', '😎', '🤓', '🥳', '😇', '🤠', '🧐', '😴', '🤖', '👻', '👽', '🦸', '🧙', '🧛',
+      '🐶', '🐱', '🦊', '🐼', '🦁', '🐯', '🐸', '🐵', '🦄', '🐙', '🦉', '🐢', '🦖', '🐧', '🐝', '🦋', '🐳', '🐬',
+      '🌵', '🌻', '🍀', '🔥', '⚡', '🌈', '⭐', '🌙', '☀️', '❄️', '🌊', '🌋',
+      '☕', '🍕', '🍔', '🌮', '🍩', '🍎', '🍓', '🥑', '🍺', '🍦',
+      '🎸', '🎧', '🎮', '🎲', '📚', '✈️', '🚲', '⚽', '🏀', '🎾', '⛰️', '🏖️', '🎨', '🎬',
+      '🚀', '🧭', '📊', '📈', '🔒', '🏗️', '💡', '🔧', '💻', '🐞', '🤝', '🌟', '🏆', '🧪'
+    ];
+
+    // The built-in cast: 24 original characters, like a classic board.
+    const DEFAULT_CAST = [
+      { id: '1', name: 'Captain Waffles', tag: 'Penguin pilot', emoji: '🐧', color: 'sky' },
+      { id: '2', name: 'Professor Pickle', tag: 'Brine scientist', emoji: '🥒', color: 'lime' },
+      { id: '3', name: 'Luna Bright', tag: 'Night-shift stargazer', emoji: '🌙', color: 'violet' },
+      { id: '4', name: 'Chef Basil', tag: 'Pizza perfectionist', emoji: '🍕', color: 'orange' },
+      { id: '5', name: 'Rex Thunder', tag: 'Dinosaur stuntman', emoji: '🦖', color: 'emerald' },
+      { id: '6', name: 'Mabel Quill', tag: 'Grumpy librarian', emoji: '🦉', color: 'amber' },
+      { id: '7', name: 'DJ Nebula', tag: 'Spins on a space station', emoji: '🎧', color: 'fuchsia' },
+      { id: '8', name: 'Sir Crumpet', tag: 'Tea-loving tortoise', emoji: '🐢', color: 'teal' },
+      { id: '9', name: 'Zippy Volt', tag: 'Overcaffeinated courier', emoji: '⚡', color: 'amber' },
+      { id: '10', name: 'Dr. Octavia', tag: 'Eight-armed surgeon', emoji: '🐙', color: 'rose' },
+      { id: '11', name: 'Fern Prickle', tag: 'Desert gardener', emoji: '🌵', color: 'emerald' },
+      { id: '12', name: 'Blaze Bruno', tag: 'Hot sauce tycoon', emoji: '🔥', color: 'rose' },
+      { id: '13', name: 'Kiki Sparkle', tag: 'Glitter inspector', emoji: '🦄', color: 'fuchsia' },
+      { id: '14', name: 'Agent Whisker', tag: 'Undercover house cat', emoji: '🐱', color: 'slate' },
+      { id: '15', name: 'Gus Gadget', tag: 'Robot tinkerer', emoji: '🤖', color: 'cyan' },
+      { id: '16', name: 'Penny Pixel', tag: 'Speedrun champion', emoji: '🎮', color: 'indigo' },
+      { id: '17', name: 'Ollie Orbit', tag: 'Reluctant astronaut', emoji: '🚀', color: 'indigo' },
+      { id: '18', name: 'Cosmo Cone', tag: 'Ice cream truck driver', emoji: '🍦', color: 'sky' },
+      { id: '19', name: 'Fiona Fox', tag: 'Sneaky chess master', emoji: '🦊', color: 'orange' },
+      { id: '20', name: 'Baron Bubbles', tag: 'Whale-sized magician', emoji: '🐳', color: 'cyan' },
+      { id: '21', name: 'Mo Mocha', tag: 'Barista with opinions', emoji: '☕', color: 'slate' },
+      { id: '22', name: 'Nico Nacho', tag: 'Taco truck legend', emoji: '🌮', color: 'lime' },
+      { id: '23', name: 'Wanda Wing', tag: 'Chatty parrot', emoji: '🦜', color: 'teal' },
+      { id: '24', name: 'Magnus Mist', tag: 'Weather wizard', emoji: '🧙', color: 'violet' }
+    ];
+
+    // =====================================================================
+    // 1. STATE
+    // =====================================================================
+    let roster = [];            // MY saved cast (editable in the lobby, persisted)
+    let cast = [];              // cast ACTIVE in the current game (the host's cast, for both players)
+    let isHost = false;
+    let peer = null, peerOpened = false;
+    let conn = null;
+    let joinTimer = null;
+    let phase = 'lobby';        // lobby | syncing | selecting | playing | over
+    let round = 1;
+    let score = { me: 0, them: 0 };
+    let mySecretId = null, mySecretNonce = null, myCommit = null;
+    let opponentSecretId = null, oppCommit = null, opponentIsReady = false;
+    let pendingPickId = null;   // highlighted in the picker but not locked in yet
+    let eliminatedSet = new Set();
+    let myTurn = false, guessMode = false;
+    let sentAccusation = null;
+    let pendingAccusationId = null;
+    let rematchMine = false, rematchTheirs = false;
+    let allowRemotePhotos = true;
+    let unread = 0, chatVisible = false;
+    const newLook = { name: '', photo: '', emoji: '', color: '' };   // draft look for the "add" form
+    let newLookEditor = null;
+    const cardRefs = new Map();   // board tiles
+    const pickRefs = new Map();   // picker buttons
+
+    const $ = (id) => document.getElementById(id);
+    function el(tag, cls, text) {
+      const n = document.createElement(tag);
+      if (cls) n.className = cls;
+      if (text != null) n.textContent = text;
+      return n;
+    }
+
+    // =====================================================================
+    // 2. SECURITY / VALIDATION HELPERS
+    // =====================================================================
+
+    function randomHex(bytes) {
+      const buf = new Uint8Array(bytes);
+      crypto.getRandomValues(buf);
+      return Array.from(buf, b => b.toString(16).padStart(2, '0')).join('');
+    }
+
+    // ~49 bits of entropy, unbiased (rejection sampling), cryptographically random
+    function randomRoomCode() {
+      const chars = [];
+      const buf = new Uint8Array(32);
+      while (chars.length < 10) {
+        crypto.getRandomValues(buf);
+        for (const b of buf) {
+          if (b < 248 && chars.length < 10) chars.push(CODE_ALPHABET[b % CODE_ALPHABET.length]);
+        }
+      }
+      return ROOM_PREFIX + chars.slice(0, 5).join('') + '-' + chars.slice(5).join('');
+    }
+
+    function normalizeCode(raw) {
+      return String(raw || '').trim().toLowerCase().replace(/\s+/g, '');
+    }
+
+    // Strip control + invisible/bidi-override characters, turn line breaks and tabs into spaces,
+    // collapse whitespace, cap length. The zero-width joiners (U+200C, U+200D) are kept on purpose:
+    // they hold family, flag and profession emoji together, and spell some words in Persian and Hindi.
+    const UNSAFE_CHARS_RE = /[\u0000-\u001f\u007f-\u009f\u200b\u200e\u200f\u202a-\u202e\u2066-\u2069\ufeff]/g;
+    function cleanText(value, max) {
+      if (typeof value !== 'string') return '';
+      const s = value.replace(/[\t\r\n\u2028\u2029]+/g, ' ').replace(UNSAFE_CHARS_RE, '').replace(/\s+/g, ' ').trim();
+      if (!/[^\s\u200c\u200d]/.test(s)) return '';          // nothing visible left
+      return Array.from(s).slice(0, max).join('');
+    }
+
+    // A picture is either a base64 data URI (small png/jpeg/webp, or a GIF up to MAX_GIF_CHARS) or an https URL.
+    const DATA_IMG_RE = /^data:image\/(?:jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/;
+    const DATA_GIF_RE = /^data:image\/gif;base64,R0lGOD[A-Za-z0-9+/]*={0,2}$/;     // "GIF87a" / "GIF89a" header
+    function sanitizePhoto(raw) {
+      if (typeof raw !== 'string') return '';
+      const s = raw.trim();
+      if (!s) return '';
+      if (s.length <= MAX_PHOTO_CHARS && DATA_IMG_RE.test(s)) return s;
+      if (s.length <= MAX_GIF_CHARS && DATA_GIF_RE.test(s)) return s;
+      if (s.length > MAX_URL_CHARS) return '';
+      try {
+        const u = new URL(s);
+        if (u.protocol === 'https:' && !u.username && !u.password) return u.href;
+      } catch (e) { /* not a URL */ }
+      return '';
+    }
+
+    // An emoji is ONE grapheme made only of emoji parts: no plain text, no markup.
+    let EMOJI_RE;
+    try {
+      EMOJI_RE = new RegExp('^(?:\\p{Extended_Pictographic}|\\p{Regional_Indicator})(?:\\p{Extended_Pictographic}|\\p{Regional_Indicator}|\\p{Emoji_Modifier}|\\u200d|\\ufe0e|\\ufe0f|[\\u{e0020}-\\u{e007f}])*$', 'u');
+    } catch (e) {
+      EMOJI_RE = /^[^\u0000-\u007f]{1,16}$/;       // very old browser: accept any short non-ASCII text
+    }
+    function sanitizeEmoji(raw) {
+      if (typeof raw !== 'string') return '';
+      let s = raw.trim().slice(0, 64);
+      if (!s) return '';
+      if (typeof Intl !== 'undefined' && Intl.Segmenter) {
+        const first = new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(s)[Symbol.iterator]().next();
+        s = first.done ? '' : first.value.segment;
+      }
+      return (s && s.length <= 16 && EMOJI_RE.test(s)) ? s : '';
+    }
+
+    // Colors are looked up in a fixed palette, never used as raw CSS/SVG values
+    const PALETTE_KEYS = new Set(PALETTE.map(p => p.key));
+    function sanitizeColor(raw) {
+      return (typeof raw === 'string' && PALETTE_KEYS.has(raw)) ? raw : '';
+    }
+
+    // Treat any cast that arrives from another browser (or an import file) as untrusted input.
+    // Accepts the older `role` field as a synonym for `tag`.
+    function sanitizeCast(input) {
+      const out = [];
+      const seen = new Set();
+      let skipped = 0;
+      let imgBudget = MAX_TOTAL_IMG_CHARS;
+      if (!Array.isArray(input)) return { cast: out, skipped: 0 };
+      for (const item of input.slice(0, MAX_CAST + 40)) {
+        if (out.length >= MAX_CAST || !item || typeof item !== 'object') { skipped++; continue; }
+        const id = typeof item.id === 'string' ? item.id : (typeof item.id === 'number' ? String(item.id) : '');
+        const name = cleanText(item.name, MAX_TEXT);
+        if (!name || !/^[A-Za-z0-9_-]{1,40}$/.test(id) || seen.has(id)) { skipped++; continue; }
+        seen.add(id);
+        let photo = sanitizePhoto(item.photo);
+        if (photo.startsWith('data:')) {                  // embedded pictures share one overall budget
+          if (photo.length > imgBudget) photo = '';
+          else imgBudget -= photo.length;
+        }
+        out.push({
+          id, name,
+          tag: cleanText(typeof item.tag === 'string' ? item.tag : item.role, MAX_TEXT),
+          photo,
+          emoji: sanitizeEmoji(item.emoji),
+          color: sanitizeColor(item.color)
+        });
+      }
+      return { cast: out, skipped };
+    }
+
+    const cloneCast = (r) => r.map(c => ({ id: c.id, name: c.name, tag: c.tag || '', photo: c.photo || '', emoji: c.emoji || '', color: c.color || '' }));
+
+    // ---- SHA-256 (pure JS, works in any context; used for the secret-pick commitment) ----
+    const sha256Hex = (function () {
+      const K = [], H0 = [];
+      (function init() {
+        const isPrime = (n) => { for (let i = 2; i * i <= n; i++) if (n % i === 0) return false; return true; };
+        const frac = (x) => ((x - Math.floor(x)) * 0x100000000) | 0;
+        for (let n = 2, count = 0; count < 64; n++) {
+          if (!isPrime(n)) continue;
+          if (count < 8) H0[count] = frac(Math.pow(n, 1 / 2));
+          K[count] = frac(Math.pow(n, 1 / 3));
+          count++;
+        }
+      })();
+      const rr = (x, n) => (x >>> n) | (x << (32 - n));
+      return function (str) {
+        const bytes = new TextEncoder().encode(str);
+        const len = bytes.length;
+        const padded = new Uint8Array(((len + 9 + 63) >> 6) << 6);
+        padded.set(bytes);
+        padded[len] = 0x80;
+        const dv = new DataView(padded.buffer);
+        dv.setUint32(padded.length - 8, Math.floor(len * 8 / 0x100000000));
+        dv.setUint32(padded.length - 4, (len * 8) >>> 0);
+        const H = H0.slice();
+        const w = new Array(64);
+        for (let off = 0; off < padded.length; off += 64) {
+          for (let i = 0; i < 16; i++) w[i] = dv.getUint32(off + i * 4);
+          for (let i = 16; i < 64; i++) {
+            const s0 = rr(w[i - 15], 7) ^ rr(w[i - 15], 18) ^ (w[i - 15] >>> 3);
+            const s1 = rr(w[i - 2], 17) ^ rr(w[i - 2], 19) ^ (w[i - 2] >>> 10);
+            w[i] = (w[i - 16] + s0 + w[i - 7] + s1) | 0;
+          }
+          let a = H[0], b = H[1], c = H[2], d = H[3], e = H[4], f = H[5], g = H[6], h = H[7];
+          for (let i = 0; i < 64; i++) {
+            const S1 = rr(e, 6) ^ rr(e, 11) ^ rr(e, 25);
+            const ch = (e & f) ^ (~e & g);
+            const t1 = (h + S1 + ch + K[i] + w[i]) | 0;
+            const S0 = rr(a, 2) ^ rr(a, 13) ^ rr(a, 22);
+            const maj = (a & b) ^ (a & c) ^ (b & c);
+            const t2 = (S0 + maj) | 0;
+            h = g; g = f; f = e; e = (d + t1) | 0; d = c; c = b; b = a; a = (t1 + t2) | 0;
+          }
+          H[0] = (H[0] + a) | 0; H[1] = (H[1] + b) | 0; H[2] = (H[2] + c) | 0; H[3] = (H[3] + d) | 0;
+          H[4] = (H[4] + e) | 0; H[5] = (H[5] + f) | 0; H[6] = (H[6] + g) | 0; H[7] = (H[7] + h) | 0;
+        }
+        return H.map(x => (x >>> 0).toString(16).padStart(8, '0')).join('');
+      };
+    })();
+
+    const commitFor = (rnd, secretId, nonce) => sha256Hex(rnd + '|' + secretId + '|' + nonce);
+
+    function verifyReveal(commit, rnd, secretId, nonce) {
+      return typeof commit === 'string' && typeof secretId === 'string' && typeof nonce === 'string' &&
+        /^[0-9a-f]{32}$/.test(nonce) && cast.some(c => c.id === secretId) &&
+        commitFor(rnd, secretId, nonce) === commit;
+    }
+
+    // ---- Avatars: a photo if there is one, otherwise a color tile with an emoji (or initials).
+    //      Everything is drawn locally; no third-party avatar service is contacted. ----
+    const avatarCache = new Map();
+
+    function nameHash(name) {
+      let h = 0;
+      for (const ch of String(name)) h = (h * 31 + ch.codePointAt(0)) >>> 0;
+      return h;
+    }
+
+    function paletteFor(c) {
+      return PALETTE.find(p => p.key === c.color) || PALETTE[nameHash(c.name) % PALETTE.length];
+    }
+
+    function tileAvatar(c) {
+      const emoji = c.emoji || '';
+      const color = paletteFor(c);
+      const cacheKey = c.name + '\u0000' + emoji + '\u0000' + color.key;
+      if (avatarCache.has(cacheKey)) return avatarCache.get(cacheKey);
+
+      let glyph, size;
+      if (emoji) {
+        glyph = emoji; size = 54;
+      } else {
+        const words = cleanText(c.name, MAX_TEXT).split(' ').filter(Boolean);
+        const first = words.length ? Array.from(words[0])[0] : '?';
+        const last = words.length > 1 ? Array.from(words[words.length - 1])[0] : '';
+        glyph = (first + last).toUpperCase();
+        size = Array.from(glyph).length > 1 ? 36 : 44;
+      }
+      const esc = (s) => s.replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96">` +
+        `<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".22"/><stop offset="1" stop-color="#000" stop-opacity=".25"/></linearGradient></defs>` +
+        `<rect width="96" height="96" fill="${color.hex}"/><rect width="96" height="96" fill="url(#g)"/>` +
+        (emoji ? `<circle cx="48" cy="48" r="34" fill="#fff" fill-opacity=".14"/>` : '') +
+        `<text x="48" y="52" text-anchor="middle" dominant-baseline="central" font-family="Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji, Segoe UI, Roboto, Arial, sans-serif" font-size="${size}"${emoji ? '' : ' font-weight="700" fill="#fff"'}>${esc(glyph)}</text></svg>`;
+      const uri = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+      avatarCache.set(cacheKey, uri);
+      return uri;
+    }
+
+    function avatarSrc(c) {
+      const p = c.photo;
+      if (p && p.startsWith('data:')) return p;
+      if (p && allowRemotePhotos) return p;      // https URL, only when allowed
+      return tileAvatar(c);
+    }
+
+    function setAvatar(img, c) {
+      img.referrerPolicy = 'no-referrer';
+      img.onerror = function () { this.onerror = null; this.src = tileAvatar(c); };
+      img.src = avatarSrc(c);
+    }
+
+    const describe = (c) => c.name + (c.tag ? ', ' + c.tag : '');
+
+    function readAsDataURL(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result));
+        reader.onerror = () => reject(new Error("Couldn't read that file."));
+        reader.readAsDataURL(file);
+      });
+    }
+
+    // Turn an uploaded picture into something small enough to save and send.
+    // Returns { uri, note }. `note` is a message for the user when we had to compromise.
+    // - PNG/JPEG/WebP are cropped to a small square JPEG.
+    // - GIFs are kept as they are (so they stay animated) if they fit, otherwise we fall back to their first frame.
+    async function fileToAvatarData(file, budgetLeft) {
+      if (!/^image\/(png|jpeg|webp|gif)$/.test(file.type)) throw new Error('Please choose a PNG, JPEG, WebP or GIF image.');
+      if (file.size > 10 * 1024 * 1024) throw new Error('That file is over 10 MB, which is too big.');
+      let note = '';
+      if (file.type === 'image/gif') {
+        const uri = await readAsDataURL(file);
+        if (DATA_GIF_RE.test(uri) && uri.length <= MAX_GIF_CHARS && uri.length <= budgetLeft) return { uri, note: '' };
+        note = uri.length > MAX_GIF_CHARS
+          ? "That GIF is over about 200 KB, so we only used its first frame. To keep it moving, paste a link to it instead."
+          : "Your cast is already full of pictures, so we only used this GIF's first frame. Paste a link to keep it moving.";
+      }
+      let bmp;
+      if (window.createImageBitmap) {
+        bmp = await createImageBitmap(file);
+      } else {
+        bmp = await new Promise((resolve, reject) => {
+          const url = URL.createObjectURL(file);
+          const im = new Image();
+          im.onload = () => { URL.revokeObjectURL(url); resolve(im); };
+          im.onerror = () => { URL.revokeObjectURL(url); reject(new Error("Couldn't read that image.")); };
+          im.src = url;
+        });
+      }
+      const w = bmp.width, h = bmp.height, side = Math.min(w, h);
+      const canvas = document.createElement('canvas');
+      canvas.width = canvas.height = PHOTO_PX;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#0f172a';
+      ctx.fillRect(0, 0, PHOTO_PX, PHOTO_PX);
+      // square crop, biased towards the top (faces) for portrait photos
+      ctx.drawImage(bmp, (w - side) / 2, (h - side) * 0.25, side, side, 0, 0, PHOTO_PX, PHOTO_PX);
+      if (bmp.close) bmp.close();
+      for (const q of [0.82, 0.7, 0.55, 0.4]) {
+        const uri = canvas.toDataURL('image/jpeg', q);
+        if (uri.length <= MAX_PHOTO_CHARS) return { uri, note };
+      }
+      throw new Error("We couldn't shrink that image enough. Try a different one.");
+    }
+
+    // How many characters of embedded picture data this cast can still take, not counting the
+    // character being edited (`look`, which is either a cast member or the "add" form's draft).
+    function imageBudgetLeft(look) {
+      let used = 0;
+      const count = (c) => { if (c !== look && c.photo && c.photo.startsWith('data:')) used += c.photo.length; };
+      roster.forEach(count);
+      count(newLook);
+      return MAX_TOTAL_IMG_CHARS - used;
+    }
+
+    // Pasting a Giphy page link (giphy.com/gifs/funny-cat-AbC123) gives you a web page, not a picture.
+    // Turn it into the direct image link so it just works. Other sites need a direct link already.
+    function normalizePhotoLink(raw) {
+      const v = String(raw || '').trim();
+      try {
+        const u = new URL(v);
+        if (/^(www\.)?giphy\.com$/.test(u.hostname)) {
+          const m = /\/(?:gifs|stickers|embed)\/(?:[^/]*-)?([A-Za-z0-9]+)\/?$/.exec(u.pathname);
+          if (m) return 'https://media.giphy.com/media/' + m[1] + '/giphy.gif';
+        }
+      } catch (e) { /* not a URL: sanitizePhoto will reject it */ }
+      return v;
+    }
+
+    // =====================================================================
+    // 3. GENERIC UI HELPERS (toasts, modals, views)
+    // =====================================================================
+
+    // `action` is optional: { label, onClick } renders a button inside the toast.
+    function showToast(message, type = 'info', action) {
+      const container = $('toast-container');
+      const toast = el('div', 'toast enter ' + type, message);
+      let timer;
+      const dismiss = () => {
+        clearTimeout(timer);
+        toast.classList.add('enter');
+        setTimeout(() => toast.remove(), 300);
+      };
+      if (action) {
+        const b = el('button', 'toast-action', action.label);
+        b.type = 'button';
+        b.onclick = () => { action.onClick(); dismiss(); };
+        toast.appendChild(b);
+      }
+      container.appendChild(toast);
+      setTimeout(() => toast.classList.remove('enter'), 10);
+      const ttl = action ? 7000 : Math.min(9000, Math.max(3500, message.length * 55));
+      timer = setTimeout(dismiss, ttl);
+    }
+
+    // Modals: focus management, Escape to close, Tab trapped inside the top-most dialog
+    const modalStack = [];
+    function openModal(modal, focusEl) {
+      modal.hidden = false;
+      if (!modalStack.some(m => m.el === modal)) modalStack.push({ el: modal, opener: document.activeElement });
+      const target = focusEl || modal.querySelector('button, input');
+      if (target) target.focus();
+    }
+    function closeModal(modal) {
+      modal.hidden = true;
+      const i = modalStack.findIndex(m => m.el === modal);
+      if (i >= 0) {
+        const opener = modalStack.splice(i, 1)[0].opener;
+        if (opener && document.contains(opener) && typeof opener.focus === 'function') opener.focus();
+      }
+    }
+    document.addEventListener('keydown', (e) => {
+      const top = modalStack[modalStack.length - 1];
+      if (!top) {
+        if (e.key === 'Escape' && guessMode) setGuessMode(false);
+        return;
+      }
+      if (e.key === 'Escape') {
+        const fn = top.el.dataset.escape;
+        if (fn && typeof window[fn] === 'function') { e.preventDefault(); window[fn](); }
+      } else if (e.key === 'Tab') {
+        const items = Array.from(top.el.querySelectorAll('button:not([disabled]), input:not([disabled]):not([type="hidden"]), select, textarea, [href], [tabindex]:not([tabindex="-1"])'))
+          .filter(n => n.offsetParent !== null);
+        if (!items.length) return;
+        const first = items[0], last = items[items.length - 1];
+        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+        else if (!top.el.contains(document.activeElement)) { e.preventDefault(); first.focus(); }
+      }
+    });
+
+    function showView(name) {
+      $('lobby-view').hidden = name !== 'lobby';
+      $('selection-view').hidden = name !== 'selection';
+      $('game-view').hidden = name !== 'game';
+      window.scrollTo(0, 0);
+    }
+
+    function setPhase(p) {
+      phase = p;
+      updateRosterButton();
+    }
+
+    function updateRosterButton() {
+      const btn = $('open-roster-btn');
+      const locked = phase !== 'lobby';
+      btn.disabled = locked;
+      btn.title = locked ? "You can't edit the cast during a game" : '';
+    }
+
+    // state: 'good' | 'warn' | 'bad'
+    function updateConnectionStatus(state, text) {
+      const badge = $('connection-badge');
+      badge.hidden = false;
+      badge.className = 'badge badge-' + state;
+      $('conn-status-text').textContent = text;
+    }
+    function hideConnectionBadge() {
+      $('connection-badge').hidden = true;
+    }
+
+    function showDisconnectBanner(text) {
+      $('disconnect-banner-text').textContent = text;
+      $('disconnect-banner').hidden = false;
+    }
+    function dismissDisconnectBanner() {
+      $('disconnect-banner').hidden = true;
+    }
+
+    function showLobbyError(text) {
+      const box = $('lobby-error');
+      box.textContent = text;
+      box.hidden = false;
+      showToast(text, 'error');
+    }
+    function clearLobbyError() {
+      const box = $('lobby-error');
+      box.textContent = '';
+      box.hidden = true;
+    }
+
+    function setLobbyBusy(mode) { // 'none' | 'host' | 'join'
+      const hostBtn = $('host-btn'), joinBtn = $('join-btn'), input = $('join-code-input');
+      hostBtn.disabled = mode !== 'none';
+      joinBtn.disabled = mode !== 'none';
+      input.disabled = mode !== 'none';
+      hostBtn.firstElementChild.textContent = mode === 'host' ? 'Connecting…' : 'Create a room';
+      joinBtn.firstElementChild.textContent = mode === 'join' ? 'Connecting…' : 'Join game';
+    }
+
+    // =====================================================================
+    // 4. CAST PERSISTENCE
+    // =====================================================================
+
+    function loadSavedRoster() {
+      let loaded = null;
+      try {
+        const saved = localStorage.getItem(STORAGE_KEY);
+        if (saved) {
+          const clean = sanitizeCast(JSON.parse(saved)).cast;
+          if (clean.length >= MIN_CAST) loaded = clean;
+        }
+      } catch (err) {
+        console.warn("Could not load the saved cast:", err);
+      }
+      roster = loaded || cloneCast(DEFAULT_CAST);
+      cast = cloneCast(roster);
+      updateRosterBadge();
+    }
+
+    function saveRoster() {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(roster));
+      } catch (err) {
+        console.warn("Could not persist the cast to localStorage:", err);
+        showToast("Could not save the cast in this browser (storage full?).", "warning");
+      }
+      updateRosterBadge();
+    }
+
+    function updateRosterBadge() {
+      $('roster-count-badge').textContent = String(roster.length);
+    }
+
+    // =====================================================================
+    // 5. NETWORKING (PEERJS)
+    // =====================================================================
+
+    const TIMEOUT_HELP = "We couldn't connect in time. Double-check the code first. If that's right, a firewall, proxy or VPN may be getting in the way, so try another network (a phone hotspot works well).";
+
+    function teardownNetwork() {
+      clearTimeout(joinTimer);
+      joinTimer = null;
+      const oldConn = conn, oldPeer = peer;
+      conn = null; peer = null; peerOpened = false;     // detach first so late events are ignored
+      try { if (oldConn) oldConn.close(); } catch (e) { /* ignore */ }
+      try { if (oldPeer) oldPeer.destroy(); } catch (e) { /* ignore */ }
+    }
+
+    // Return to the lobby from anywhere (also used by "New game" / "Back to lobby" / Cancel)
+    function resetSession() {
+      teardownNetwork();
+      isHost = false;
+      setPhase('lobby');
+      round = 1;
+      score = { me: 0, them: 0 };
+      mySecretId = mySecretNonce = myCommit = opponentSecretId = oppCommit = pendingPickId = null;
+      opponentIsReady = false;
+      eliminatedSet.clear();
+      myTurn = false; guessMode = false; sentAccusation = null; pendingAccusationId = null;
+      rematchMine = rematchTheirs = false;
+      allowRemotePhotos = true;
+      cast = cloneCast(roster);
+      cardRefs.clear();
+      pickRefs.clear();
+
+      closeModal($('gameover-modal'));
+      closeModal($('accusation-modal'));
+      $('over-banner').hidden = true;
+      dismissDisconnectBanner();
+      hideConnectionBadge();
+      clearChat();
+      resetAttention();
+      updateRemotePhotoUI();
+
+      $('host-action-area').hidden = false;
+      $('host-room-info').hidden = true;
+      $('join-code-input').value = '';
+      clearLobbyError();
+      setLobbyBusy('none');
+      showView('lobby');
+    }
+
+    function initializeHost(attempt) {
+      if (typeof Peer === 'undefined') { showLobbyError("We couldn't load the connection library (PeerJS) from unpkg.com, so hosting isn't available right now. A firewall or ad blocker may be stopping it."); return; }
+      attempt = typeof attempt === 'number' ? attempt : 0;
+      clearLobbyError();
+      isHost = true;
+      setLobbyBusy('host');
+
+      const p = new Peer(randomRoomCode(), buildPeerOptions());
+      peer = p; peerOpened = false;
+
+      p.on('open', (id) => {
+        if (p !== peer) return;
+        if (peerOpened) {                       // re-registered after a signaling drop
+          showToast("Reconnected to the room server.", "success");
+          if (!conn) updateConnectionStatus('warn', "Waiting for opponent");
+          return;
+        }
+        peerOpened = true;
+        $('host-action-area').hidden = true;
+        $('host-room-info').hidden = false;
+        $('display-room-code').textContent = id;
+        // an invite link only makes sense when the page itself is served from a shareable URL
+        const hosted = /^https?:$/.test(location.protocol);
+        $('copy-invite-btn').hidden = !hosted;
+        $('share-btn').hidden = !(hosted && navigator.share);
+        updateConnectionStatus('warn', "Waiting for opponent");
+        showToast("Room created! Send the code to your friend.", "info");
+      });
+
+      p.on('connection', (c) => onIncomingConnection(p, c));
+      p.on('disconnected', () => handleSignalingDisconnected(p));
+      p.on('error', (err) => {
+        if (p !== peer) return;
+        if (err.type === 'unavailable-id' && attempt < 5) {   // astronomically unlikely, but retry with a new code
+          peer = null;
+          try { p.destroy(); } catch (e) { /* ignore */ }
+          initializeHost(attempt + 1);
+          return;
+        }
+        handlePeerError(err);
+      });
+    }
+
+    // The room accepts exactly ONE opponent; anyone else is turned away.
+    function onIncomingConnection(p, c) {
+      if (p !== peer) { try { c.close(); } catch (e) { /* ignore */ } return; }
+      if (conn) {
+        c.on('open', () => {
+          try { c.send({ type: 'ROOM_BUSY' }); } catch (e) { /* ignore */ }
+          setTimeout(() => { try { c.close(); } catch (e) { /* ignore */ } }, 400);
+        });
+        return;
+      }
+      conn = c;
+      attachConnection(c);
+    }
+
+    function initializeGuest(codeArg) {
+      if (typeof Peer === 'undefined') { showLobbyError("We couldn't load the connection library (PeerJS) from unpkg.com, so joining isn't available right now. A firewall or ad blocker may be stopping it."); return; }
+      const code = normalizeCode(typeof codeArg === 'string' ? codeArg : $('join-code-input').value);
+      clearLobbyError();
+      if (!CODE_RE.test(code)) {
+        showLobbyError("That doesn't look like a room code. They look like " + ROOM_PREFIX + "xxxxx-xxxxx.");
+        return;
+      }
+      $('join-code-input').value = code;
+      isHost = false;
+      setLobbyBusy('join');
+
+      const p = new Peer(buildPeerOptions());
+      peer = p; peerOpened = false;
+      joinTimer = setTimeout(() => { if (p === peer && phase === 'lobby') failJoin(TIMEOUT_HELP); }, CONNECT_TIMEOUT_MS);
+
+      p.on('open', () => {
+        if (p !== peer) return;
+        peerOpened = true;
+        try {
+          const c = p.connect(code, { reliable: true });
+          conn = c;
+          attachConnection(c);
+        } catch (e) {
+          failJoin("Could not start the connection: " + (e && e.message ? e.message : e));
+        }
+      });
+      p.on('error', (err) => { if (p === peer) handlePeerError(err); });
+    }
+
+    function handleJoinSubmit(e) {
+      e.preventDefault();
+      initializeGuest();
+    }
+
+    function failJoin(message) {
+      const typed = $('join-code-input').value;       // keep what they typed so a typo is easy to fix
+      resetSession();
+      $('join-code-input').value = typed;
+      showLobbyError(message);
+    }
+
+    function handlePeerError(err) {
+      console.error("PeerJS error:", err);
+      const type = err && err.type ? err.type : 'unknown';
+      const serverish = ['network', 'server-error', 'socket-error', 'socket-closed'];
+      const texts = {
+        'peer-unavailable': "We couldn't find that room. Check the code, and make sure your friend is still hosting.",
+        'network': "We can't reach the room server. Check your internet connection, VPN or proxy (it needs to get through to 0.peerjs.com).",
+        'server-error': "The room server hit a snag. Give it a moment and try again.",
+        'socket-error': "Lost the connection to the room server.",
+        'socket-closed': "Lost the connection to the room server.",
+        'browser-incompatible': "This browser can't do the kind of direct connection the game needs. A recent Chrome, Edge, Firefox or Safari will.",
+        'invalid-id': "That room code isn't valid.",
+        'ssl-unavailable': "We couldn't open a secure connection to the room server.",
+        'webrtc': "Something went wrong while setting up the connection."
+      };
+      const message = texts[type] || ("Something went wrong with the connection (" + type + ").");
+
+      // Once a game connection is up, signaling hiccups don't matter to it
+      if (conn && conn.open) { showToast(message, 'warning'); return; }
+      // Host that already has a room: signaling drops are handled by reconnect logic
+      if (isHost && peerOpened && serverish.indexOf(type) !== -1) { showToast(message, 'warning'); return; }
+      failJoin(message);
+    }
+
+    // Host: signaling websocket dropped (laptop sleep, VPN switch...). Keep the room alive.
+    function handleSignalingDisconnected(p) {
+      if (p !== peer || p.destroyed || !peerOpened) return;
+      if (!conn) updateConnectionStatus('warn', "Reconnecting to room server…");
+      attemptReconnect(p, 0);
+    }
+    function attemptReconnect(p, n) {
+      if (p !== peer || p.destroyed || !p.disconnected) return;
+      if (n >= 6) { signalingLost(p); return; }
+      setTimeout(() => {
+        if (p !== peer || p.destroyed || !p.disconnected) return;
+        try { p.reconnect(); } catch (e) { console.warn("reconnect failed:", e); }
+        setTimeout(() => attemptReconnect(p, n + 1), 3000);
+      }, Math.min(1000 * Math.pow(2, n), 8000));
+    }
+    function signalingLost(p) {
+      if (p !== peer) return;
+      if (conn && conn.open) {
+        showToast("We lost touch with the room server. Your game can carry on, but nobody new can join.", "warning");
+      } else {
+        failJoin("We lost the connection to the room server. Create a new room to try again.");
+      }
+    }
+
+    // Wires up one DataConnection (either side). Handlers ignore events from stale connections.
+    function attachConnection(c) {
+      let opened = false;
+      const openTimer = setTimeout(() => { if (!opened) failPending(c, TIMEOUT_HELP); }, CONNECT_TIMEOUT_MS);
+
+      c.on('open', () => {
+        clearTimeout(openTimer);
+        if (c !== conn) { try { c.close(); } catch (e) { /* ignore */ } return; }
+        opened = true;
+        onConnectionOpen();
+      });
+      c.on('data', (data) => {
+        if (c === conn && opened) handleIncomingMessage(data);
+      });
+      c.on('close', () => {
+        clearTimeout(openTimer);
+        if (c !== conn) return;
+        if (!opened) failPending(c, TIMEOUT_HELP);
+        else onConnectionClosed();
+      });
+      c.on('error', (err) => {
+        console.error("Channel error:", err);
+        clearTimeout(openTimer);
+        if (c !== conn) return;
+        if (!opened) failPending(c, "The direct connection didn't work" + (err && err.type ? " (" + err.type + ")" : "") + ". A firewall or VPN may be blocking it, so try another network.");
+        else showToast("Something went wrong with the connection.", "warning");
+      });
+    }
+
+    function failPending(c, message) {
+      if (c !== conn) return;
+      if (isHost) {
+        conn = null;                              // room is free for the real opponent to try again
+        try { c.close(); } catch (e) { /* ignore */ }
+        showToast("Someone tried to join but it didn't work out. Still waiting for your opponent…", "warning");
+      } else {
+        failJoin(message);
+      }
+    }
+
+    function onConnectionOpen() {
+      clearTimeout(joinTimer);
+      joinTimer = null;
+      dismissDisconnectBanner();
+      clearLobbyError();
+      updateConnectionStatus('good', "Connected");
+      showToast("Connected!", "success");
+      closeModal($('roster-modal'));
+      clearChat();
+      resetAttention();
+      round = 1;
+      score = { me: 0, them: 0 };
+
+      if (isHost) {
+        cast = cloneCast(roster);                 // snapshot: the cast is locked from here on
+        allowRemotePhotos = true;
+        conn.send({ type: 'SYNC_CAST', v: PROTO_VERSION, cast: cast });
+        startSelectionPhase();
+      } else {
+        // wait for the host's cast before showing anything pickable
+        setPhase('syncing');
+        allowRemotePhotos = false;
+        mySecretId = null;
+        showView('selection');
+        $('selection-grid').textContent = '';
+        $('lock-bar').hidden = true;
+        setBadge([["Connected! Getting the host's characters…", "pulse"]]);
+        joinTimer = setTimeout(() => { if (phase === 'syncing') failJoin("The host never sent their characters. Please try again."); }, SYNC_TIMEOUT_MS);
+      }
+    }
+
+    function onConnectionClosed() {
+      conn = null;
+      updateConnectionStatus('bad', "Opponent left");
+      const roomOpen = isHost && peer && !peer.disconnected && !peer.destroyed;
+      showDisconnectBanner(roomOpen
+        ? "Your opponent disconnected. Your room is still open, so they can rejoin with the same code, or you can start a new game."
+        : (isHost ? "Your opponent disconnected. Start a new game to play again." : "The host disconnected. Start a new game to host or join again."));
+      showToast("Your opponent left the game", "warning");
+    }
+
+    // =====================================================================
+    // 6. MESSAGE PROTOCOL (every game message is phase- and round-checked)
+    // =====================================================================
+
+    function send(msg) {
+      if (conn && conn.open) {
+        conn.send(Object.assign({ round: round }, msg));
+        return true;
+      }
+      return false;
+    }
+
+    function handleIncomingMessage(msg) {
+      if (!msg || typeof msg !== 'object' || typeof msg.type !== 'string') return;
+
+      switch (msg.type) {
+        case 'ROOM_BUSY':
+          if (!isHost) failJoin("That room is already full.");
+          break;
+
+        case 'SYNC_CAST': {
+          if (isHost || phase !== 'syncing') return;       // only the guest, only once, only right after connecting
+          clearTimeout(joinTimer); joinTimer = null;
+          if (msg.v !== PROTO_VERSION) {
+            failJoin("You and your friend are on different versions of the game. Ask them to send you the same file or link they're using.");
+            return;
+          }
+          const clean = sanitizeCast(msg.cast).cast;
+          if (clean.length < MIN_CAST) { failJoin("The host's cast didn't look right, so we couldn't load it."); return; }
+          cast = clean;                                     // session only: never written to this browser's saved cast
+          round = 1;
+          startSelectionPhase();
+          showToast("You're playing with the host's characters.", "info");
+          break;
+        }
+
+        case 'PLAYER_READY':
+          if (phase !== 'selecting' || msg.round !== round || opponentIsReady) return;
+          if (typeof msg.commit !== 'string' || !/^[0-9a-f]{64}$/.test(msg.commit)) return;
+          opponentIsReady = true;
+          oppCommit = msg.commit;
+          updateSelectionUI();
+          checkBothLocked();
+          break;
+
+        case 'CHAT': {
+          if (phase !== 'playing' && phase !== 'over') return;
+          const text = cleanText(msg.text, MAX_CHAT);
+          if (!text) return;
+          addChatMessage("Opponent", text, "them");
+          // the results popup sits on top of the chat, so show the message another way while it's open
+          if (phase === 'over' && !$('gameover-modal').hidden) showToast("Opponent: " + Array.from(text).slice(0, 90).join('') + (Array.from(text).length > 90 ? '…' : ''), "info");
+          notifyAttention(true);
+          break;
+        }
+
+        case 'TURN_END':
+          if (phase !== 'playing' || msg.round !== round || myTurn) return;
+          myTurn = true;
+          updateTurnUI();
+          addChatMessage("System", "It's your turn.", "sys");
+          showToast("It's your turn!", "info");
+          notifyAttention(false);
+          break;
+
+        case 'ACCUSATION':
+          handleAccusation(msg);
+          break;
+
+        case 'ACCUSATION_VERDICT':
+          handleVerdict(msg);
+          break;
+
+        case 'PLAY_AGAIN':
+          if (phase !== 'over' || msg.round !== round) return;
+          rematchTheirs = true;
+          if (rematchMine) { startNextRound(); break; }
+          $('rematch-status').textContent = "Your opponent wants another round!";
+          if ($('gameover-modal').hidden) {                // they're looking at the board, so nudge them
+            updateOverBanner();
+            showToast("Your opponent wants another round!", "info");
+          }
+          break;
+      }
+    }
+
+    // Defender: judge an accusation and reveal our (committed) secret.
+    function handleAccusation(msg) {
+      if (phase !== 'playing' || msg.round !== round || myTurn) return;   // wrong phase/round or out of turn
+      if (typeof msg.targetId !== 'string' || typeof msg.secretId !== 'string') return;
+      const isCorrect = msg.targetId === mySecretId;
+      const revealOk = verifyReveal(oppCommit, round, msg.secretId, msg.nonce);
+      send({ type: 'ACCUSATION_VERDICT', accusedId: msg.targetId, secretId: mySecretId, nonce: mySecretNonce });
+      opponentSecretId = revealOk ? msg.secretId : null;
+      if (!revealOk) {
+        triggerGameOver('void', "This round doesn't count. The character your opponent revealed doesn't match the one they locked in at the start.");
+      } else if (isCorrect) {
+        triggerGameOver('lost', "They worked out your secret character!");
+      } else {
+        triggerGameOver('won', "Your opponent guessed wrong, so this round is yours!");
+      }
+    }
+
+    // Accuser: never trust a claimed result. Recompute it from the revealed, verified secret.
+    function handleVerdict(msg) {
+      if (phase !== 'playing' || msg.round !== round || !sentAccusation) return;
+      if (typeof msg.secretId !== 'string') return;
+      const revealOk = verifyReveal(oppCommit, round, msg.secretId, msg.nonce);
+      const target = sentAccusation;
+      sentAccusation = null;
+      opponentSecretId = revealOk ? msg.secretId : null;
+      if (!revealOk) {
+        triggerGameOver('void', "This round doesn't count. The character your opponent revealed doesn't match the one they locked in at the start.");
+      } else if (target === msg.secretId) {
+        triggerGameOver('won', "Nailed it! You found their secret character.");
+      } else {
+        triggerGameOver('lost', "Not quite. That wasn't their character, so this round goes to your opponent.");
+      }
+    }
+
+    // =====================================================================
+    // 7. GAME FLOW & DOM RENDERING
+    // =====================================================================
+
+    // parts: [[text, className?], ...]
+    function setBadge(parts) {
+      const badge = $('selection-status-badge');
+      badge.textContent = '';
+      parts.forEach(([text, cls]) => badge.appendChild(el('span', cls || '', text)));
+    }
+
+    function startSelectionPhase() {
+      clearTimeout(joinTimer); joinTimer = null;
+      setPhase('selecting');
+      mySecretId = mySecretNonce = myCommit = opponentSecretId = oppCommit = pendingPickId = null;
+      opponentIsReady = false;
+      eliminatedSet.clear();
+      sentAccusation = null; myTurn = false; guessMode = false;
+      rematchMine = rematchTheirs = false;
+      closeModal($('gameover-modal'));
+      $('over-banner').hidden = true;
+      showView('selection');
+      renderSelectionGrid();
+      updateRemotePhotoUI();
+    }
+
+    function startNextRound() {
+      round += 1;
+      startSelectionPhase();
+      addChatMessage("System", "Round " + round + ": pick a new secret character.", "sys");
+    }
+
+    function renderSelectionGrid() {
+      const container = $('selection-grid');
+      container.textContent = '';
+      pickRefs.clear();
+      cast.forEach(c => {
+        const btn = el('button', 'pick');
+        btn.type = 'button';
+        btn.title = c.name + (c.tag ? ' – ' + c.tag : '');
+        btn.setAttribute('aria-label', "Choose " + describe(c) + " as your secret");
+        btn.setAttribute('aria-pressed', 'false');
+        btn.onclick = (e) => previewPick(c.id, e.detail === 0);
+
+        const art = el('span', 'art');
+        const img = el('img');
+        img.alt = '';
+        setAvatar(img, c);
+        art.appendChild(img);
+        btn.append(art, el('span', 'nm', c.name));
+        if (c.tag) btn.appendChild(el('span', 'tg', c.tag));
+
+        container.appendChild(btn);
+        pickRefs.set(c.id, btn);
+      });
+      updateSelectionUI();
+    }
+
+    // Step 1: highlight a character. Nothing is committed or sent yet.
+    function previewPick(id, viaKeyboard) {
+      if (phase !== 'selecting' || mySecretId) return;
+      if (!cast.some(c => c.id === id)) return;
+      pendingPickId = id;
+      updateSelectionUI();
+      if (viaKeyboard) $('lock-btn').focus();     // keyboard users shouldn't have to tab through the whole grid
+    }
+
+    // Step 2: lock it in (sends only a hash of the pick)
+    function lockInSecret() {
+      if (phase !== 'selecting' || mySecretId || !pendingPickId) return;
+      const chosen = cast.find(c => c.id === pendingPickId);
+      if (!chosen) return;
+      if (!conn || !conn.open) { showToast("You're not connected to your opponent right now.", "warning"); return; }
+
+      mySecretId = chosen.id;
+      mySecretNonce = randomHex(16);
+      myCommit = commitFor(round, mySecretId, mySecretNonce);   // binds the pick without revealing it
+      send({ type: 'PLAYER_READY', commit: myCommit });
+      updateSelectionUI();
+      checkBothLocked();
+    }
+
+    function updateSelectionUI() {
+      if (phase !== 'selecting') return;
+      const locked = !!mySecretId;
+      const activeId = locked ? mySecretId : pendingPickId;
+      pickRefs.forEach((btn, id) => {
+        const on = id === activeId;
+        btn.classList.toggle('selected', on);
+        btn.setAttribute('aria-pressed', String(on));
+        btn.disabled = locked && !on;
+      });
+
+      const chosen = cast.find(c => c.id === activeId);
+      $('lock-bar').hidden = !chosen;
+      if (chosen) {
+        setAvatar($('lock-avatar'), chosen);
+        $('lock-name').textContent = chosen.name;
+        $('lock-label').textContent = locked ? 'Locked in' : 'Your secret';
+        $('lock-btn').hidden = locked;
+        $('lock-wait').hidden = !locked;
+      }
+
+      if (locked) setBadge([["Locked in. Waiting for your opponent…", "pulse"]]);
+      else if (opponentIsReady) setBadge([["Your opponent is locked in and waiting for you", "txt-gold"]]);
+      else setBadge([["Tap a character to choose your secret"]]);
+    }
+
+    function checkBothLocked() {
+      if (phase !== 'selecting' || !mySecretId || !opponentIsReady) return;
+      setPhase('playing');
+      // round 1: host goes first, then alternate
+      myTurn = (isHost === (round % 2 === 1));
+      const r = round;
+      setTimeout(() => { if (phase === 'playing' && round === r && mySecretId) launchMainBoard(); }, 400);
+    }
+
+    function launchMainBoard() {
+      showView('game');
+      const mySecret = cast.find(c => c.id === mySecretId);
+      $('my-secret-name').textContent = mySecret.name;
+      $('my-secret-tag').textContent = mySecret.tag;
+      setAvatar($('my-secret-avatar'), mySecret);
+
+      renderMainBoard();
+      updateRemainingCounter();
+      updateScoreUI();
+      updateTurnUI();
+      updateRemotePhotoUI();
+      addChatMessage("System", "You're both ready! " + (myTurn ? "You go first." : "Your opponent goes first.") + " Ask yes/no questions in the chat, then hit End turn.", "sys");
+      scrollChatToBottom();                 // the chat was hidden while earlier messages were added
+    }
+
+    const tileLabel = (c) => describe(c) + (guessMode ? ". Select as your final guess" : ". Toggle flipped down");
+
+    // Build the board once; flipping a card only toggles classes (no rebuild, no scroll jump)
+    function renderMainBoard() {
+      const board = $('board-grid');
+      board.textContent = '';
+      cardRefs.clear();
+
+      cast.forEach(c => {
+        const tile = el('div', 'tile');
+        const btn = el('button', 'tile-btn');
+        btn.type = 'button';
+        btn.title = c.name + (c.tag ? ' – ' + c.tag : '');
+        btn.onclick = () => onTileClick(c.id);
+
+        const art = el('span', 'art');
+        const img = el('img');
+        img.alt = '';
+        setAvatar(img, c);
+        const x = el('span', 'tile-x', '✕');
+        x.setAttribute('aria-hidden', 'true');
+        art.append(img, x);
+
+        btn.append(art, el('span', 'nm', c.name));
+        if (c.tag) btn.appendChild(el('span', 'tg', c.tag));
+        tile.appendChild(btn);
+        board.appendChild(tile);
+
+        cardRefs.set(c.id, { tile, btn, c });
+        applyEliminated(c.id);
+      });
+      board.classList.toggle('guessing', guessMode);
+      updateGuessButtons();
+    }
+
+    function onTileClick(id) {
+      if (guessMode) openAccusationModal(id);
+      else toggleElimination(id);
+    }
+
+    function applyEliminated(id) {
+      const ref = cardRefs.get(id);
+      if (!ref) return;
+      const out = eliminatedSet.has(id);
+      ref.tile.classList.toggle('out', out);
+      ref.btn.setAttribute('aria-pressed', String(out));
+      ref.btn.setAttribute('aria-label', tileLabel(ref.c));
+    }
+
+    function toggleElimination(id) {
+      if (eliminatedSet.has(id)) eliminatedSet.delete(id);
+      else eliminatedSet.add(id);
+      applyEliminated(id);
+      updateRemainingCounter();
+    }
+
+    function resetBoardEliminations() {
+      if (!eliminatedSet.size) return;
+      const ids = Array.from(eliminatedSet);
+      eliminatedSet.clear();
+      ids.forEach(applyEliminated);
+      updateRemainingCounter();
+      showToast("Everyone's back on the board", "info");
+    }
+
+    function updateRemainingCounter() {
+      $('remaining-count').textContent = String(cast.length - eliminatedSet.size);
+    }
+
+    function updateScoreUI() {
+      $('round-count').textContent = String(round);
+      $('score-text').textContent = score.me + ' – ' + score.them;
+    }
+
+    // ---- Turns ----
+    function updateTurnUI() {
+      if (phase === 'over') {
+        $('turn-indicator').classList.remove('mine');
+        $('turn-title').textContent = "Round over";
+        $('turn-sub').textContent = "Chat for a bit, or start the next round when you're both ready.";
+      } else {
+        $('turn-indicator').classList.toggle('mine', myTurn);
+        $('turn-title').textContent = myTurn ? "Your turn" : "Opponent's turn";
+        $('turn-sub').textContent = myTurn
+          ? "Ask a yes/no question, then pass the turn. Or take your shot with a final guess."
+          : "Answer their questions in the chat.";
+      }
+      updateGuessButtons();
+    }
+
+    function updateGuessButtons() {
+      const canAct = phase === 'playing' && myTurn && !sentAccusation;
+      const guessBtn = $('guess-mode-btn'), endBtn = $('end-turn-btn');
+      guessBtn.disabled = !canAct;
+      endBtn.disabled = !canAct;
+      const why = canAct ? '' : (sentAccusation ? 'Waiting for the verdict…' : 'Wait for your turn');
+      guessBtn.title = why;
+      endBtn.title = why;
+      if (!canAct && guessMode) setGuessMode(false);
+    }
+
+    function toggleGuessMode() {
+      if (guessMode) { setGuessMode(false); return; }
+      if (phase !== 'playing' || !myTurn || sentAccusation) { showToast("You can only make a final guess on your own turn.", "warning"); return; }
+      setGuessMode(true);
+    }
+
+    // Guess mode: the next tap on a character opens the confirmation instead of flipping the card
+    function setGuessMode(on) {
+      guessMode = on;
+      $('board-grid').classList.toggle('guessing', on);
+      $('guess-banner').hidden = !on;
+      const btn = $('guess-mode-btn');
+      btn.setAttribute('aria-pressed', String(on));
+      btn.textContent = on ? 'Cancel guess' : '🎯 Final guess';
+      cardRefs.forEach((ref) => ref.btn.setAttribute('aria-label', tileLabel(ref.c)));
+    }
+
+    function endTurn() {
+      if (phase !== 'playing' || !myTurn || sentAccusation) return;
+      if (!send({ type: 'TURN_END' })) { showToast("You're not connected to your opponent right now.", "warning"); return; }
+      myTurn = false;
+      updateTurnUI();
+      addChatMessage("System", "You passed the turn.", "sys");
+    }
+
+    // ---- Remote (linked) photo consent for the joining player ----
+    function remotePhotoHosts() {
+      const hosts = new Set();
+      cast.forEach(c => {
+        if (c.photo && !c.photo.startsWith('data:')) {
+          try { hosts.add(new URL(c.photo).hostname); } catch (e) { /* ignore */ }
+        }
+      });
+      return Array.from(hosts);
+    }
+
+    function updateRemotePhotoUI() {
+      const hosts = remotePhotoHosts();
+      const need = !isHost && !allowRemotePhotos && hosts.length > 0 && (phase === 'selecting' || phase === 'playing' || phase === 'over');
+      $('remote-photo-hosts').textContent = hosts.slice(0, 3).join(', ') + (hosts.length > 3 ? ' and more' : '');
+      $('remote-photo-banner').hidden = !(need && phase === 'selecting');
+      $('remote-photo-btn').hidden = !need || phase === 'selecting';
+    }
+
+    function allowRemotePhotosNow() {
+      allowRemotePhotos = true;
+      if (phase === 'selecting') renderSelectionGrid();
+      if (phase === 'playing' || phase === 'over') {
+        renderMainBoard();
+        const mine = cast.find(c => c.id === mySecretId);
+        if (mine) setAvatar($('my-secret-avatar'), mine);
+      }
+      updateRemotePhotoUI();
+    }
+
+    // ---- Final guess ----
+    function openAccusationModal(candidateId) {
+      if (phase !== 'playing' || !myTurn || sentAccusation) { showToast("You can only make a final guess on your own turn.", "warning"); return; }
+      const candidate = cast.find(c => c.id === candidateId);
+      if (!candidate) return;
+      pendingAccusationId = candidateId;
+      $('accuse-modal-name').textContent = candidate.name;
+      $('accuse-modal-tag').textContent = candidate.tag;
+      setAvatar($('accuse-modal-avatar'), candidate);
+      openModal($('accusation-modal'), $('accuse-cancel-btn'));
+    }
+
+    function closeAccusationModal() {
+      pendingAccusationId = null;
+      closeModal($('accusation-modal'));
+    }
+
+    function executeAccusation() {
+      if (!pendingAccusationId) return;
+      const candidateId = pendingAccusationId;
+      closeAccusationModal();
+      if (phase !== 'playing' || !myTurn || sentAccusation) return;
+      sentAccusation = candidateId;
+      // our own pick is revealed together with the accusation; it is checked against our earlier commitment
+      if (!send({ type: 'ACCUSATION', targetId: candidateId, secretId: mySecretId, nonce: mySecretNonce })) {
+        sentAccusation = null;
+        showToast("Your guess couldn't be sent because your opponent isn't connected.", "error");
+        return;
+      }
+      updateGuessButtons();
+      addChatMessage("System", "Guess sent. Waiting to hear if you got it…", "sys");
+      const r = round;
+      setTimeout(() => {
+        if (phase === 'playing' && round === r && sentAccusation) showToast("Still no answer. Your opponent may have dropped off.", "warning");
+      }, 15000);
+    }
+
+    function triggerGameOver(outcome, message) {
+      setPhase('over');
+      closeAccusationModal();
+      setGuessMode(false);
+      sentAccusation = null;
+      rematchMine = rematchTheirs = false;
+
+      if (outcome === 'won') score.me += 1;
+      else if (outcome === 'lost') score.them += 1;
+      updateScoreUI();
+
+      const icon = $('gameover-icon'), title = $('gameover-title');
+      if (outcome === 'won') {
+        icon.className = 'modal-icon ic-good';
+        icon.textContent = '🏆';
+        title.textContent = 'You won!';
+        launchConfetti();
+      } else if (outcome === 'lost') {
+        icon.className = 'modal-icon ic-bad';
+        icon.textContent = '💀';
+        title.textContent = 'You lost';
+      } else {
+        icon.className = 'modal-icon ic-warn';
+        icon.textContent = '⚠️';
+        title.textContent = 'Match voided';
+      }
+      $('gameover-message').textContent = message;
+      $('gameover-score').textContent = 'Round ' + round + ' · You ' + score.me + ' – ' + score.them + ' Opponent';
+
+      fillReveal('reveal-my-name', 'reveal-my-img', cast.find(c => c.id === mySecretId));
+      fillReveal('reveal-opp-name', 'reveal-opp-img', cast.find(c => c.id === opponentSecretId));
+
+      $('rematch-status').textContent = '';
+      const btn = $('rematch-btn');
+      btn.disabled = false;
+      btn.textContent = "Play another round";
+      updateTurnUI();
+      $('over-banner').hidden = true;
+      openModal($('gameover-modal'), btn);
+    }
+
+    // After a round you can close the results to look at the board and keep chatting.
+    function reviewBoard() {
+      if (phase !== 'over') return;
+      closeModal($('gameover-modal'));
+      updateOverBanner();
+    }
+    function reopenResults() {
+      if (phase !== 'over') return;
+      $('over-banner').hidden = true;
+      openModal($('gameover-modal'), $('rematch-btn'));
+    }
+    function updateOverBanner() {
+      const banner = $('over-banner');
+      banner.hidden = !(phase === 'over' && $('gameover-modal').hidden);
+      $('over-banner-text').textContent = rematchTheirs
+        ? "Your opponent wants another round!"
+        : (rematchMine ? "Rematch requested. Waiting for your opponent…" : "Round over. Have a look around, then start the next one when you're ready.");
+    }
+
+    function fillReveal(nameId, imgId, person) {
+      const img = $(imgId);
+      if (person) {
+        $(nameId).textContent = person.name;
+        setAvatar(img, person);
+      } else {
+        $(nameId).textContent = "Unknown";
+        img.removeAttribute('src');
+      }
+    }
+
+    // Rematch needs both players to agree; nobody is yanked out of the result screen
+    function requestRematch() {
+      if (phase !== 'over' || rematchMine) return;
+      if (!send({ type: 'PLAY_AGAIN' })) { showToast("Your opponent isn't connected anymore.", "warning"); return; }
+      rematchMine = true;
+      if (rematchTheirs) { startNextRound(); return; }
+      const btn = $('rematch-btn');
+      btn.disabled = true;
+      btn.textContent = "Waiting for your opponent…";
+      $('rematch-status').textContent = "Rematch requested. Waiting for your opponent to say yes.";
+    }
+
+    function launchConfetti() {
+      if (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+      const host = $('confetti');
+      host.textContent = '';
+      const colors = ['#fbbf24', '#8b5cf6', '#34d399', '#fb7185', '#38bdf8', '#f472b6'];
+      for (let i = 0; i < 56; i++) {
+        const p = document.createElement('i');
+        p.style.left = (Math.random() * 100) + '%';
+        p.style.background = colors[i % colors.length];
+        p.style.animationDelay = (Math.random() * 0.5) + 's';
+        p.style.animationDuration = (1.8 + Math.random() * 1.6) + 's';
+        p.style.setProperty('--dx', (Math.random() * 200 - 100) + 'px');
+        host.appendChild(p);
+      }
+      setTimeout(() => { host.textContent = ''; }, 4200);
+    }
+
+    // =====================================================================
+    // 8. CHAT (safe DOM rendering) + NOTIFICATIONS
+    // =====================================================================
+
+    function clearChat() {
+      const c = $('chat-messages');
+      if (c) c.textContent = '';
+    }
+
+    function handleChatSubmit(e) {
+      e.preventDefault();
+      const input = $('chat-input');
+      const text = cleanText(input.value, MAX_CHAT);
+      if (!text) return;
+      if (send({ type: 'CHAT', text: text })) {
+        addChatMessage("You", text, "me");
+        input.value = "";
+      } else {
+        showToast("Your message didn't go through because your opponent isn't connected.", "warning");
+      }
+    }
+
+    function sendQuickReply(text) {
+      if (send({ type: 'CHAT', text: text })) addChatMessage("You", text, "me");
+      else showToast("Your reply didn't go through because your opponent isn't connected.", "warning");
+    }
+
+    function chatNearBottom() {
+      const log = $('chat-messages');
+      return log.scrollHeight - log.scrollTop - log.clientHeight < 60;
+    }
+    function scrollChatToBottom() {
+      const log = $('chat-messages');
+      log.scrollTop = log.scrollHeight;
+      $('chat-more').hidden = true;
+    }
+    function onChatScroll() {
+      if (chatNearBottom()) $('chat-more').hidden = true;
+    }
+
+    function addChatMessage(sender, text, type) {
+      const container = $('chat-messages');
+      // Follow the conversation, but don't yank someone who has scrolled up to read older messages
+      const follow = type === 'me' || chatNearBottom();
+      const bubble = el('div', 'msg ' + type);
+      if (type === 'sys') {
+        bubble.textContent = text;
+      } else {
+        bubble.appendChild(el('span', 'who', sender));
+        bubble.appendChild(el('div', '', text));       // plain text only
+      }
+      container.appendChild(bubble);
+      while (container.childElementCount > MAX_CHAT_NODES) container.removeChild(container.firstElementChild);
+      if (follow) scrollChatToBottom();
+      else $('chat-more').hidden = false;
+    }
+
+    // Tab title counter when the page is in the background; floating pill when the chat is scrolled
+    // out of view (only for real chat messages, not for turn changes)
+    function notifyAttention(showPill) {
+      if (document.hidden) {
+        unread += 1;
+        document.title = '(' + unread + ') ' + BASE_TITLE;
+      } else if (showPill && !chatVisible && (phase === 'playing' || phase === 'over')) {
+        $('chat-pill').hidden = false;
+      }
+    }
+    function resetAttention() {
+      unread = 0;
+      document.title = BASE_TITLE;
+      $('chat-pill').hidden = true;
+    }
+    function jumpToChat() {
+      $('chat-pill').hidden = true;
+      $('chat-aside').scrollIntoView({ behavior: 'smooth', block: 'center' });
+      $('chat-input').focus({ preventScroll: true });
+    }
+
+    // =====================================================================
+    // 9. CAST EDITOR (lobby only)
+    // =====================================================================
+
+    function openRosterModal() {
+      if (phase !== 'lobby') return;
+      renderRosterEditorList();
+      refreshNewLook();
+      openModal($('roster-modal'), $('new-name-input'));
+    }
+
+    function closeRosterModal() {
+      disarmReset();
+      saveRoster();
+      closeModal($('roster-modal'));
+    }
+
+    // Look editor shared by the "add" form and every cast row:
+    // pick a color, pick/type an emoji, or use a photo instead. `look` is edited in place.
+    function buildLookEditor(look, onChange) {
+      const wrap = el('div', 'look-editor');
+      const button = (text, cls) => {
+        const b = el('button', cls, text);
+        b.type = 'button';
+        return b;
+      };
+
+      // Preview
+      const head = el('div', 'look-head');
+      const preview = el('img');
+      preview.alt = '';
+      head.append(preview, el('p', '', "Pick a color and emoji that make this character easy to spot. If you add a photo or GIF, that's shown instead."));
+      wrap.appendChild(head);
+
+      // Colors
+      const colorWrap = el('div');
+      colorWrap.appendChild(el('div', 'look-label', 'Color'));
+      const swatches = el('div', 'swatches');
+      swatches.setAttribute('role', 'group');
+      swatches.setAttribute('aria-label', 'Color');
+      const autoBtn = button('Auto', 'chip');
+      autoBtn.title = "Pick a color automatically from the name";
+      autoBtn.onclick = () => { look.color = ''; update(); };
+      swatches.appendChild(autoBtn);
+      const swatchBtns = PALETTE.map(p => {
+        const b = button('', 'swatch');
+        b.style.backgroundColor = p.hex;
+        b.title = p.name;
+        b.setAttribute('aria-label', p.name);
+        b.onclick = () => { look.color = p.key; update(); };
+        swatches.appendChild(b);
+        return { b, key: p.key };
+      });
+      colorWrap.appendChild(swatches);
+      wrap.appendChild(colorWrap);
+
+      // Emoji
+      const emojiWrap = el('div');
+      emojiWrap.appendChild(el('div', 'look-label', 'Emoji'));
+      const emojiRow = el('div', 'look-row');
+      emojiRow.style.marginBottom = '.5rem';
+      const emojiInput = el('input', 'input input-sm emoji-in');
+      emojiInput.type = 'text';
+      emojiInput.maxLength = 16;
+      emojiInput.placeholder = "Type or paste an emoji";
+      emojiInput.setAttribute('aria-label', 'Emoji');
+      emojiInput.oninput = () => {
+        const v = emojiInput.value.trim();
+        if (!v) look.emoji = '';                       // clearing the field removes the emoji
+        else { const e = sanitizeEmoji(v); if (e) look.emoji = e; }   // typing junk leaves it unchanged
+        update();
+      };
+      emojiInput.onblur = () => { emojiInput.value = look.emoji || ''; };
+      const noneBtn = button('No emoji', 'chip');
+      noneBtn.onclick = () => { look.emoji = ''; emojiInput.value = ''; update(); };
+      emojiRow.append(emojiInput, noneBtn, el('span', 'tiny', "Tip: press Win + . on Windows or Ctrl + Cmd + Space on a Mac to open your emoji picker."));
+      const grid = el('div', 'emoji-grid');
+      const emojiBtns = EMOJI_CHOICES.map(e => {
+        const b = button(e, 'emoji-btn');
+        b.onclick = () => { look.emoji = e; emojiInput.value = e; update(); };
+        grid.appendChild(b);
+        return { b, e };
+      });
+      emojiWrap.append(emojiRow, grid);
+      wrap.appendChild(emojiWrap);
+
+      // Photo (optional, overrides color + emoji)
+      const photoWrap = el('div');
+      photoWrap.appendChild(el('div', 'look-label', 'Photo or GIF (optional)'));
+      const photoRow = el('div', 'look-row');
+      const fileInput = el('input');
+      fileInput.type = 'file';
+      fileInput.accept = 'image/png,image/jpeg,image/webp,image/gif';
+      fileInput.hidden = true;
+      fileInput.onchange = async () => {
+        const file = fileInput.files && fileInput.files[0];
+        fileInput.value = '';
+        if (!file) return;
+        try {
+          const result = await fileToAvatarData(file, imageBudgetLeft(look));
+          look.photo = result.uri;
+          urlInput.value = '';
+          update();
+          if (result.note) showToast(result.note, 'info');
+        } catch (err) {
+          showToast(err && err.message ? err.message : "Couldn't use that image.", "error");
+        }
+      };
+      const uploadBtn = button('📷 Upload photo or GIF', 'chip');
+      uploadBtn.onclick = () => fileInput.click();
+      const removeBtn = button('Remove photo', 'chip');
+      removeBtn.onclick = () => { look.photo = ''; urlInput.value = ''; update(); };
+      const urlInput = el('input', 'input input-sm');
+      urlInput.type = 'text';
+      urlInput.maxLength = 500;
+      urlInput.placeholder = "or paste a link to a picture or GIF";
+      urlInput.setAttribute('aria-label', 'Link to a picture or GIF');
+      urlInput.onchange = () => {
+        const v = urlInput.value.trim();
+        if (!v) return;
+        const p = sanitizePhoto(normalizePhotoLink(v));
+        if (!p || p.startsWith('data:')) {
+          showToast("That doesn't look like a picture link. It needs to start with https:// and point straight at the image, like one ending in .gif.", "warning");
+          urlInput.value = '';
+          return;
+        }
+        look.photo = p;
+        update();
+      };
+      photoRow.append(uploadBtn, removeBtn, urlInput, fileInput);
+      const photoNote = el('p', 'tiny amber', "This picture replaces the color and emoji. Remove it to bring them back.");
+      photoNote.style.marginTop = '.4rem';
+      const photoTip = el('p', 'tiny', "GIFs up to about 200 KB keep moving when uploaded. For bigger ones, paste a link instead (Giphy links work as they are). Your opponent is asked before a linked picture loads.");
+      photoTip.style.marginTop = '.4rem';
+      photoWrap.append(photoRow, photoNote, photoTip);
+      wrap.appendChild(photoWrap);
+
+      function refresh() {
+        setAvatar(preview, look);
+        autoBtn.setAttribute('aria-pressed', String(!look.color));
+        swatchBtns.forEach(({ b, key }) => b.setAttribute('aria-pressed', String(look.color === key)));
+        emojiBtns.forEach(({ b, e }) => b.setAttribute('aria-pressed', String(look.emoji === e)));
+        removeBtn.hidden = !look.photo;
+        photoNote.hidden = !look.photo;
+      }
+      function update() { refresh(); onChange(); }
+      function sync() { emojiInput.value = look.emoji || ''; urlInput.value = ''; refresh(); }
+      sync();
+
+      return { el: wrap, refresh, sync };
+    }
+
+    function renderRosterEditorList() {
+      const list = $('roster-editor-list');
+      list.textContent = '';
+
+      roster.forEach((c, index) => {
+        const item = el('div', 'cast-row');
+        const top = el('div', 'cast-row-top');
+
+        const img = el('img', 'cast-avatar');
+        img.alt = '';
+        setAvatar(img, c);
+
+        // name and tagline are editable in place
+        const fields = el('div', 'cast-fields');
+        const nameIn = el('input', 'input input-sm');
+        nameIn.type = 'text';
+        nameIn.maxLength = MAX_TEXT;
+        nameIn.value = c.name;
+        nameIn.setAttribute('aria-label', 'Name of character ' + (index + 1));
+        nameIn.onchange = () => {
+          const v = cleanText(nameIn.value, MAX_TEXT);
+          if (!v) { nameIn.value = c.name; showToast("A character needs a name.", "warning"); return; }
+          c.name = v; nameIn.value = v;
+          saveRoster();
+          setAvatar(img, c);
+        };
+        const tagIn = el('input', 'input input-sm');
+        tagIn.type = 'text';
+        tagIn.maxLength = MAX_TEXT;
+        tagIn.value = c.tag;
+        tagIn.placeholder = "Tagline (optional)";
+        tagIn.setAttribute('aria-label', 'Tagline of character ' + (index + 1));
+        tagIn.onchange = () => {
+          c.tag = cleanText(tagIn.value, MAX_TEXT);
+          tagIn.value = c.tag;
+          saveRoster();
+        };
+        fields.append(nameIn, tagIn);
+
+        const actions = el('div', 'cast-actions');
+        const lookBtn = el('button', 'btn btn-ghost btn-sm', '🎨 Look');
+        lookBtn.type = 'button';
+        lookBtn.setAttribute('aria-expanded', 'false');
+        lookBtn.setAttribute('aria-label', "Edit look for " + c.name);
+        let panel = null;
+        lookBtn.onclick = () => {
+          if (panel) {
+            panel.remove();
+            panel = null;
+            lookBtn.setAttribute('aria-expanded', 'false');
+            return;
+          }
+          panel = buildLookEditor(c, () => { saveRoster(); setAvatar(img, c); }).el;
+          item.appendChild(panel);
+          lookBtn.setAttribute('aria-expanded', 'true');
+        };
+
+        const deleteBtn = el('button', 'btn btn-danger btn-sm', 'Delete');
+        deleteBtn.type = 'button';
+        deleteBtn.setAttribute('aria-label', "Delete " + c.name);
+        deleteBtn.onclick = () => removeFromCast(c.id);
+
+        actions.append(lookBtn, deleteBtn);
+        top.append(img, fields, actions);
+        item.appendChild(top);
+        list.appendChild(item);
+      });
+    }
+
+    // "Add" form: the round preview opens the same look editor
+    function refreshNewLook() {
+      setAvatar($('new-look-preview'), newLook);
+      if (newLookEditor) newLookEditor.refresh();
+    }
+
+    function onNewNameInput(value) {
+      newLook.name = cleanText(value, MAX_TEXT);
+      refreshNewLook();
+    }
+
+    function toggleNewLook() {
+      const panel = $('new-look-panel'), btn = $('new-look-btn');
+      if (panel.hidden) {
+        if (!newLookEditor) {
+          newLookEditor = buildLookEditor(newLook, refreshNewLook);
+          panel.appendChild(newLookEditor.el);
+        }
+        panel.hidden = false;
+        btn.setAttribute('aria-expanded', 'true');
+      } else {
+        panel.hidden = true;
+        btn.setAttribute('aria-expanded', 'false');
+      }
+    }
+
+    function addCharacterFromForm(e) {
+      if (e) e.preventDefault();
+      const nameInput = $('new-name-input'), tagInput = $('new-tag-input');
+      const name = cleanText(nameInput.value, MAX_TEXT);
+      const tag = cleanText(tagInput.value, MAX_TEXT);
+
+      if (!name) { showToast("Give your character a name first.", "warning"); nameInput.focus(); return; }
+      if (roster.length >= MAX_CAST) { showToast("The cast is limited to " + MAX_CAST + " characters.", "warning"); return; }
+
+      roster.push({ id: randomHex(8), name, tag, photo: newLook.photo, emoji: newLook.emoji, color: newLook.color });
+      saveRoster();
+      renderRosterEditorList();
+      const last = $('roster-editor-list').lastElementChild;
+      if (last) last.scrollIntoView({ block: 'nearest' });
+
+      nameInput.value = ''; tagInput.value = '';
+      Object.assign(newLook, { name: '', photo: '', emoji: '', color: '' });
+      if (newLookEditor) newLookEditor.sync();
+      refreshNewLook();
+      showToast("Added " + name, "success");
+      nameInput.focus();
+    }
+
+    function removeFromCast(id) {
+      if (roster.length <= MIN_CAST) {
+        showToast("Keep at least " + MIN_CAST + " characters so the game works.", "warning");
+        return;
+      }
+      const index = roster.findIndex(c => c.id === id);
+      if (index < 0) return;
+      const removed = roster.splice(index, 1)[0];
+      saveRoster();
+      renderRosterEditorList();
+      showToast("Removed " + removed.name, "info", {
+        label: 'Undo',
+        onClick: () => {
+          if (roster.length >= MAX_CAST) return;
+          roster.splice(Math.min(index, roster.length), 0, removed);
+          saveRoster();
+          renderRosterEditorList();
+        }
+      });
+    }
+
+    // Resetting wipes custom characters, so it takes two clicks
+    let resetTimer = null;
+    function disarmReset() {
+      clearTimeout(resetTimer);
+      resetTimer = null;
+      const btn = $('reset-cast-btn');
+      btn.textContent = 'Reset to default cast';
+      btn.classList.remove('armed');
+    }
+    function resetRosterToDefaults() {
+      if (!resetTimer) {
+        const btn = $('reset-cast-btn');
+        btn.textContent = 'Click again to replace your cast';
+        btn.classList.add('armed');
+        resetTimer = setTimeout(disarmReset, 4000);
+        return;
+      }
+      disarmReset();
+      roster = cloneCast(DEFAULT_CAST);
+      saveRoster();
+      renderRosterEditorList();
+      showToast("Back to the default cast", "info");
+    }
+
+    function exportRoster() {
+      const blob = new Blob([JSON.stringify(roster, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'whodini-cast.json';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+
+    function importRoster(input) {
+      const file = input.files && input.files[0];
+      input.value = '';
+      if (!file) return;
+      if (file.size > 12 * 1024 * 1024) { showToast("That file is too big to be a cast.", "error"); return; }
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const result = sanitizeCast(JSON.parse(String(reader.result)));
+          if (result.cast.length < MIN_CAST) { showToast("That file needs at least " + MIN_CAST + " usable characters.", "error"); return; }
+          roster = result.cast;
+          saveRoster();
+          renderRosterEditorList();
+          showToast("Imported " + roster.length + " characters" + (result.skipped ? " (" + result.skipped + " couldn't be used)" : "") + ".", "success");
+        } catch (err) {
+          showToast("That doesn't look like a cast file.", "error");
+        }
+      };
+      reader.onerror = () => showToast("Couldn't read that file.", "error");
+      reader.readAsText(file);
+    }
+
+    // =====================================================================
+    // 10. CLIPBOARD, SHARING
+    // =====================================================================
+
+    function inviteLink(code) {
+      return location.origin + location.pathname + location.search + '#join=' + encodeURIComponent(code);
+    }
+
+    async function copyRoomCode() {
+      const ok = await copyText($('display-room-code').textContent);
+      showToast(ok ? "Room code copied!" : "Couldn't copy that automatically. You can select the code and copy it yourself.", ok ? "success" : "warning");
+    }
+
+    async function copyInviteLink() {
+      const ok = await copyText(inviteLink($('display-room-code').textContent));
+      showToast(ok ? "Invite link copied. (The room code sits after the #, so it never goes to a web server.)" : "Couldn't copy that automatically. You can select the code and copy it yourself.", ok ? "success" : "warning");
+    }
+
+    async function shareInvite() {
+      try {
+        await navigator.share({ title: APP_NAME, text: "Come play " + APP_NAME + " with me!", url: inviteLink($('display-room-code').textContent) });
+      } catch (e) { /* cancelled */ }
+    }
+
+    async function copyText(text) {
+      if (navigator.clipboard && window.isSecureContext) {
+        try {
+          await navigator.clipboard.writeText(text);
+          return true;
+        } catch (e) { /* fall back below */ }
+      }
+      const temp = document.createElement("textarea");
+      temp.value = text;
+      temp.style.position = "fixed";
+      temp.style.left = "-9999px";
+      temp.style.top = "0";
+      document.body.appendChild(temp);
+      temp.focus();
+      temp.select();
+      let ok = false;
+      try { ok = document.execCommand("copy"); } catch (err) { ok = false; }
+      document.body.removeChild(temp);
+      return ok;
+    }
+
+    // =====================================================================
+    // 11. INIT
+    // =====================================================================
+
+    function checkDependencies() {
+      if (typeof Peer === 'undefined') {
+        $('host-btn').disabled = true;
+        $('join-btn').disabled = true;
+        showLobbyError("We couldn't load the connection library (PeerJS) from unpkg.com, so hosting and joining aren't available. A firewall or ad blocker may be stopping it.");
+      }
+    }
+
+    // Invite links look like  https://host/path/#join=who-xxxxx-xxxxx  (also fires if the link is
+    // pasted into a tab that already has the game open, where only the #fragment changes)
+    function handleInviteHash() {
+      const m = /^#join=([A-Za-z0-9_-]+)$/.exec(location.hash);
+      if (!m || phase !== 'lobby' || peer) return;
+      try { history.replaceState(null, '', location.pathname + location.search); } catch (e) { /* ignore */ }
+      const code = normalizeCode(m[1]);
+      $('join-code-input').value = code;
+      if (CODE_RE.test(code) && typeof Peer !== 'undefined') initializeGuest(code);
+    }
+
+    window.addEventListener('DOMContentLoaded', () => {
+      loadSavedRoster();
+      updateRosterButton();
+      $('confirm-accuse-btn').onclick = executeAccusation;
+
+      document.addEventListener('visibilitychange', () => { if (!document.hidden) { unread = 0; document.title = BASE_TITLE; } });
+      if ('IntersectionObserver' in window) {
+        new IntersectionObserver((entries) => {
+          chatVisible = entries.some(e => e.isIntersecting);
+          if (chatVisible) $('chat-pill').hidden = true;
+        }, { threshold: 0.25 }).observe($('chat-aside'));
+      }
+      // keep the sticky chat panel clear of the (variable-height) header + banner
+      if ('ResizeObserver' in window) {
+        new ResizeObserver(() => {
+          document.documentElement.style.setProperty('--sticky-h', $('sticky-top').offsetHeight + 'px');
+        }).observe($('sticky-top'));
+      }
+
+      checkDependencies();
+      handleInviteHash();
+      window.addEventListener('hashchange', handleInviteHash);
+    });
+
+    // Warn before accidentally closing the tab mid-game
+    window.addEventListener('beforeunload', (e) => {
+      if (phase === 'selecting' || phase === 'playing') { e.preventDefault(); e.returnValue = ''; }
+    });
+
+    // Say goodbye explicitly when the tab closes, so the other player sees the disconnect right away
+    // instead of waiting for WebRTC to time out. If the browser later restores this page from its
+    // back/forward cache, the connection is gone, so start over from the lobby.
+    window.addEventListener('pagehide', () => teardownNetwork());
+    window.addEventListener('pageshow', (e) => { if (e.persisted) resetSession(); });
+  </script>
+</body>
+</html>
